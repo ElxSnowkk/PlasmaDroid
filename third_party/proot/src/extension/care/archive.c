@@ -20,18 +20,18 @@
  * 02110-1301 USA.
  */
 
-#include <sys/types.h>		/* open(2), lseek(2), */
-#include <sys/stat.h>		/* open(2), */
-#include <fcntl.h>		/* open(2), */
-#include <unistd.h>		/* read(2), readlink(2), close(2), lseek(2), */
-#include <errno.h>		/* errno, EACCES, */
-#include <assert.h>		/* assert(3), */
-#include <linux/limits.h>	/* PATH_MAX, */
-#include <string.h>		/* strlen(3), strcmp(3), */
-#include <stdbool.h>		/* bool, true, false, */
-#include <talloc.h>		/* talloc(3), */
-#include <archive.h>		/* archive_*(3), */
-#include <archive_entry.h>	/* archive_entry*(3), */
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <assert.h>
+#include <linux/limits.h>
+#include <string.h>
+#include <stdbool.h>
+#include <talloc.h>
+#include <archive.h>
+#include <archive_entry.h>
 
 #include "extension/care/archive.h"
 #include "tracee/tracee.h"
@@ -45,10 +45,6 @@ typedef struct {
     enum { NOT_SPECIAL = 0, SELF_EXTRACTING, RAW } special;
 } Format;
 
-/**
- * Move *@cursor backward -- within in the given @string -- if it
- * reads @suffix once moved.
- */
 static bool slurp_suffix(const char *string, const char **cursor,
 			 const char *suffix)
 {
@@ -63,12 +59,6 @@ static bool slurp_suffix(const char *string, const char **cursor,
     return true;
 }
 
-/**
- * Detect the expected format for the given @string.  This function
- * returns -1 if an error occurred, otherwise it returns 0 and updates
- * the @format structure and @suffix_length with the number of
- * characters that describes the parsed format.
- */
 static int parse_suffix(const Tracee *tracee, Format *format,
 			const char *string, size_t *suffix_length)
 {
@@ -81,8 +71,6 @@ static int parse_suffix(const Tracee *tracee, Format *format,
 
     cursor = string + strlen(string);
     bzero(format, sizeof(Format));
-
-/* parse_special: */
 
     found = slurp_suffix(string, &cursor, "/");
     if (found)
@@ -201,11 +189,6 @@ static int parse_suffix(const Tracee *tracee, Format *format,
     return 0;
 }
 
-/**
- * Copy "/proc/self/exe" into @destination.  This function returns -1
- * if an error occured, otherwise the file descriptor of the
- * destination.
- */
 static int copy_self_exe(const Tracee *tracee, const char *destination)
 {
     int output_fd;
@@ -262,12 +245,6 @@ static int copy_self_exe(const Tracee *tracee, const char *destination)
     return output_fd;
 }
 
-/**
- * Create a new archive structure (memory allocation attached to
- * @context) for the given @output file.  This function returns NULL
- * on error, otherwise the newly allocated archive structure. See
- * parse_suffix() for the meaning of @suffix_length.
- */
 Archive *new_archive(TALLOC_CTX *context, const Tracee *tracee,
 		     const char *output, size_t *suffix_length)
 {
@@ -288,8 +265,6 @@ Archive *new_archive(TALLOC_CTX *context, const Tracee *tracee,
     }
     archive->fd = -1;
 
-    /* No format was set, content will be copied into a directory
-     * instead of being archived.  */
     if (format.set_format == NULL) {
 	int flags = ARCHIVE_EXTRACT_PERM
 	    | ARCHIVE_EXTRACT_TIME
@@ -399,7 +374,6 @@ Archive *new_archive(TALLOC_CTX *context, const Tracee *tracee,
 	if (archive->fd < 0)
 	    return NULL;
 
-	/* Remember where the CARE binary ends.  */
 	archive->offset = lseek(archive->fd, 0, SEEK_CUR);
 
 	status = archive_write_open_fd(archive->handle, archive->fd);
@@ -421,7 +395,6 @@ Archive *new_archive(TALLOC_CTX *context, const Tracee *tracee,
 	    return NULL;
 	}
 
-	/* Remember where the "RAW" string ends.  */
 	archive->offset = lseek(archive->fd, 0, SEEK_CUR);
 
 	status = archive_write_open_fd(archive->handle, archive->fd);
@@ -444,10 +417,6 @@ Archive *new_archive(TALLOC_CTX *context, const Tracee *tracee,
     return archive;
 }
 
-/**
- * Finalize the given @archive.  This function returns -1 if an error
- * occurred, otherwise 0.
- */
 int finalize_archive(Archive *archive)
 {
     int status;
@@ -469,12 +438,6 @@ int finalize_archive(Archive *archive)
     return 0;
 }
 
-/**
- * Put the content of @path into @archive, with the specified @statl
- * status, at the given @alternate_path (NULL if unchanged).  This
- * function returns -1 if an error occurred, otherwise 0.  Note: this
- * function can be called with @tracee == NULL.
- */
 int archive(const Tracee *tracee, Archive *archive,
 	    const char *path, const char *alternate_path,
 	    const struct stat *statl)
@@ -505,7 +468,6 @@ int archive(const Tracee *tracee, Archive *archive,
 	archive_entry_linkify(archive->hardlink_resolver, &entry, &unused);
     }
 
-    /* Get status only once hardlinks were resolved.  */
     size = archive_entry_size(entry);
     type = archive_entry_filetype(entry);
 
@@ -523,7 +485,6 @@ int archive(const Tracee *tracee, Archive *archive,
 	}
 	target[status] = '\0';
 
-	/* Must be done before archive_write_header().  */
 	archive_entry_set_symlink(entry, target);
     }
 
@@ -540,7 +501,6 @@ int archive(const Tracee *tracee, Archive *archive,
 	goto end;
     }
 
-    /* No content to archive?  */
     if (type != AE_IFREG || size == 0) {
 	status = 0;
 	goto end;
@@ -554,7 +514,6 @@ int archive(const Tracee *tracee, Archive *archive,
 	goto end;
     }
 
-    /* Copy the content from the file into the archive.  */
     do {
 	uint8_t buffer[4096];
 

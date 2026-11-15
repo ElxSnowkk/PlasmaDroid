@@ -20,7 +20,7 @@
  * 02110-1301 USA.
  */
 
-#include <stdbool.h>		/* bool, true, false,  */
+#include <stdbool.h>
 
 #define NO_LIBC_HEADER
 #include "loader/script.h"
@@ -58,9 +58,6 @@
 
 #define unlikely(expr) __builtin_expect(!!(expr), 0)
 
-/**
- * Clear the memory from @start (inclusive) to @end (exclusive).
- */
 static inline void clear(word_t start, word_t end)
 {
     byte_t *start_misaligned;
@@ -69,35 +66,26 @@ static inline void clear(word_t start, word_t end)
     word_t *start_aligned;
     word_t *end_aligned;
 
-    /* Compute the number of mis-aligned bytes.  */
     word_t start_bytes = start % sizeof(word_t);
     word_t end_bytes = end % sizeof(word_t);
 
-    /* Compute aligned addresses.  */
     start_aligned =
 	(word_t *) (start_bytes ? start + sizeof(word_t) -
 		    start_bytes : start);
     end_aligned = (word_t *) (end - end_bytes);
 
-    /* Clear leading mis-aligned bytes.  */
     start_misaligned = (byte_t *) start;
     while (start_misaligned < (byte_t *) start_aligned)
 	*start_misaligned++ = 0;
 
-    /* Clear aligned bytes.  */
     while (start_aligned < end_aligned)
 	*start_aligned++ = 0;
 
-    /* Clear trailing mis-aligned bytes.  */
     end_misaligned = (byte_t *) end_aligned;
     while (end_misaligned < (byte_t *) end)
 	*end_misaligned++ = 0;
 }
 
-/**
- * Return the address of the last path component of @string_.  Note
- * that @string_ is not modified.
- */
 static inline word_t basename(word_t string_)
 {
     byte_t *string = (byte_t *) string_;
@@ -113,9 +101,6 @@ static inline word_t basename(word_t string_)
     return (word_t) cursor;
 }
 
-/**
- * Interpret the load script pointed to by @cursor.
- */
 void _start(void *cursor)
 {
     bool traced = false;
@@ -205,23 +190,13 @@ void _start(void *cursor)
 		if (unlikely((int) status < 0))
 		    FATAL();
 
-		/* Right after execve, the stack content is as follow:
-		 *
-		 *   +------+--------+--------+--------+
-		 *   | argc | argv[] | envp[] | auxv[] |
-		 *   +------+--------+--------+--------+
-		 */
-
-		/* Skip argv[].  */
 		cursor2 += argc + 1;
 
-		/* Skip envp[].  */
 		do
 		    cursor2++;
 		while (cursor2[0] != 0);
 		cursor2++;
 
-		/* Adjust auxv[].  */
 		do {
 		    switch (cursor2[0]) {
 		    case AT_PHDR:
@@ -245,9 +220,6 @@ void _start(void *cursor)
 			break;
 
 		    case AT_EXECFN:
-			/* stmt->start.at_execfn can't be used for now since it is
-			 * currently stored in a location that will be scratched
-			 * by the process (below the final stack pointer).  */
 			cursor2[1] = at_execfn;
 			break;
 
@@ -257,7 +229,6 @@ void _start(void *cursor)
 		    cursor2 += 2;
 		} while (cursor2[0] != AT_NULL);
 
-		/* Note that only 2 arguments are actually necessary... */
 		name = basename(stmt->start.at_execfn);
 		SYSCALL(PRCTL, 3, PR_SET_NAME, name, 0);
 

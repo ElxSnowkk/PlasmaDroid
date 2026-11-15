@@ -18,19 +18,6 @@
 // carregamento do tile (sem barrier); tests/glsl_run.py faz a traducao. Em GPU real KRYOSS_EMU nunca e definido.
 // Copyright (c) 2021-2023 Advanced Micro Devices, Inc. (FidelityFX FSR 1 EASU); MIT License. Licenciado como o Incandescent: LGPL-2.1-only.
 
-
-
-
-// Tile: 20x20 texels de entrada (16 pixels de saida cobrem no maximo 17 texels + 2 de folga em cada lado).
-
-
-// posicao (em texels, centro do texel = inteiro) do pixel de saida o; mesma aritmetica do fragment (vTexCoord * inSize - 0.5)
-
-
-// tensor de estrutura + linearidade da celula (cruz de 5 pontos centrada no texel)
-
-// contraste consciente de croma do 2x2 do pixel o (o ja dentro da imagem de saida)
-
 #pragma once
 
 const char* KRYOSS_CSBody = R"kryoss_comp(

@@ -1,4 +1,3 @@
-// Generated from KryoAS_Anomaly.frag; do not edit.
 static const char kKryoASAnomaly[] = R"KRYOAS(#version 300 es
 // KryoAS pass 2: artifact/color anomaly detector and conservative repair.
 // uHistory is KryoAS's previous output (not game-provided temporal data).

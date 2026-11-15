@@ -74,10 +74,6 @@ object PlasmaVKSupport {
 
     enum class InstallResult { INSTALLED, UP_TO_DATE, NO_RUNTIME, FAILED }
 
-    /**
-     * Rootfs antigos tinham as libs em usr/lib/prootkr. Move para usr/lib/plasmavk e deixa prootkr
-     * como symlink relativo, para binários antigos com o caminho antigo continuarem achando as libs.
-     */
     private fun migrateLegacyLibDir(rootfs: File) {
         val lib = File(rootfs, "usr/lib")
         val legacy = File(lib, "prootkr")

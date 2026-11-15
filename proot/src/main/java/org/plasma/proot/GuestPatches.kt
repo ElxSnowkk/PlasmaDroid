@@ -2,11 +2,6 @@ package org.plasma.proot
 
 import java.io.File
 
-/**
- * GERADO por scripts/gen-guest-patches.py a partir de scripts/guest-patches/ — não edite à mão.
- * Instala no guest Debian o comando `plasma` (plasma install <app>, plasma patch ..., plasma run ...) e os
- * patches que fazem apps como o Kdenlive funcionarem sob o PRoot. Idempotente.
- */
 object GuestPatches {
     private class Entry(val path: String, val text: String, val exec: Boolean)
 

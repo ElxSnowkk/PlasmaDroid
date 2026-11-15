@@ -27,18 +27,17 @@ precision highp sampler2D;
 #endif
 
 uniform sampler2D uInputTex;
-uniform vec4 uConst0;        // (in/out x, in/out y, 1/out x, 1/out y) - nao usado, mantido por compatibilidade
-uniform vec2 uViewportSize;  // tamanho do render (entrada) em pixels
-uniform vec4 uKryoss;        // x = kmix (bilinear -> reconstrucao), y = lob0, z = lob1, w = flatT
-uniform vec4 uKryoss2;       // x = boost (nitidez extra em baixo contraste), y = sobre-passo, z = dither (1/255 ou 0)
+uniform vec4 uConst0;
+uniform vec2 uViewportSize;
+uniform vec4 uKryoss;
+uniform vec4 uKryoss2;
 in vec2 vTexCoord;
 out vec4 oFragColor;
 
-float lumaE(vec3 c) { return dot(c, vec3(0.5, 1.0, 0.5)); }   // luma*2 do EASU
+float lumaE(vec3 c) { return dot(c, vec3(0.5, 1.0, 0.5)); }
 
 vec3 fetchC(ivec2 p, ivec2 hi) { return texelFetch(uInputTex, clamp(p, ivec2(0), hi), 0).rgb; }
 
-// Dither de ruido gradiente intercalado (Jimenez 2014), +-0.5 LSB de 8 bits. So no modo Qualidade.
 vec3 finish(vec3 c) {
 #if KRYOSS_MODE == 3
     float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
@@ -47,7 +46,6 @@ vec3 finish(vec3 c) {
     return clamp(c, 0.0, 1.0);
 }
 
-// Conjunto EASU: acumula direcao (gradiente) e "linearidade" de uma cruz de 5 pontos (a=cima, b=esq, c=centro, d=dir, e=baixo).
 void easuSet(inout vec2 dir, inout float len, float w, float a, float b, float c, float d, float e) {
     float dx = d - b;
     float lx = clamp(abs(dx) / max(max(abs(d - c), abs(c - b)), 1e-5), 0.0, 1.0);
@@ -57,7 +55,6 @@ void easuSet(inout vec2 dir, inout float len, float w, float a, float b, float c
     dir.y += dy * w;  len += ly * ly * w;
 }
 
-// Tap: Lanczos2 aproximado, eliptico, rotacionado para a direcao da borda.
 void easuTap(inout vec3 acc, inout float aw, vec2 o, vec2 dir, vec2 len2, float lob, float clp, vec3 col) {
     float r0 = (o.x * dir.x + o.y * dir.y) * len2.x;
     float r1 = (-o.x * dir.y + o.y * dir.x) * len2.y;
@@ -71,34 +68,25 @@ void easuTap(inout vec3 acc, inout float aw, vec2 o, vec2 dir, vec2 len2, float 
 void main() {
     vec2 inSize = uViewportSize;
     ivec2 hi = ivec2(inSize) - ivec2(1);
-    vec2 pos = vTexCoord * inSize - 0.5;       // coordenada em texels (centro do texel = inteiro)
+    vec2 pos = vTexCoord * inSize - 0.5;
     vec2 fp = floor(pos);
-    vec2 pp = pos - fp;                         // posicao fracionaria dentro da celula 2x2
+    vec2 pp = pos - fp;
     ivec2 ip = ivec2(fp);
 
-    //    b c
-    //  e f g h
-    //  i j k l
-    //    n o
     vec3 f = fetchC(ip, hi);
     vec3 g = fetchC(ip + ivec2(1, 0), hi);
     vec3 j = fetchC(ip + ivec2(0, 1), hi);
     vec3 k = fetchC(ip + ivec2(1, 1), hi);
 
-    // bilinear manual a partir dos 4 taps do centro (0 fetch extra)
     vec3 soft = mix(mix(f, g, pp.x), mix(j, k, pp.x), pp.y);
     vec3 mn = min(min(f, g), min(j, k));
     vec3 mx = max(max(f, g), max(j, k));
     vec3 rg = mx - mn;
 
-    // v3: contraste consciente de croma = maior diferenca por canal (azul pesa metade).
-    // Pega bordas de mesma luminancia (ex.: vermelho x verde) que o teste so de luma do v2 nao via.
-    // EASU's luma-like contrast scale: green is weighted twice, red/blue once.
-    // Keep this scale stable for sharpening and flat-region classification.
     float range = max(max(rg.r, rg.g), rg.b * 0.5);
     float flatT = uKryoss.w;
-    if (range < 0.5 * flatT) { oFragColor = vec4(finish(soft), 1.0); return; }   // plano: so o bilinear
-    float band = smoothstep(0.5 * flatT, flatT, range);   // v3: transicao suave, sem costura no limiar
+    if (range < 0.5 * flatT) { oFragColor = vec4(finish(soft), 1.0); return; }
+    float band = smoothstep(0.5 * flatT, flatT, range);
 
     float fL = lumaE(f), gL = lumaE(g), jL = lumaE(j), kL = lumaE(k);
     float lumaRange = max(max(fL, gL), max(jL, kL)) - min(min(fL, gL), min(jL, kL));
@@ -108,20 +96,16 @@ void main() {
     float aw = 0.0;
 
 #if KRYOSS_MODE == 0
-    // ---- Ultra Desempenho: 4 taps. Direcao = diferencas finitas do 2x2 ponderadas pela posicao.
     dir = vec2((gL - fL) * (1.0 - pp.y) + (kL - jL) * pp.y,
                (jL - fL) * (1.0 - pp.x) + (kL - gL) * pp.x);
     len = clamp(length(dir) / max(lumaRange, 1e-4), 0.0, 1.0);
     len = len * len;
-    // Ultra keeps the deterministic 4-tap luma gradient. A chroma fallback
-    // costs more than this tier can justify and was noisier on fine color patterns.
     float dirR = dot(dir, dir);
     bool zro = dirR < (1.0 / 32768.0);
     dirR = inversesqrt(max(dirR, 1e-12));
     dir = zro ? vec2(1.0, 0.0) : dir * dirR;
 #else
     #if KRYOSS_MODE == 1
-    // ---- Desempenho: 8 taps = f,g,j,k + b,e,l,o. Dois conjuntos EASU (celulas f e k), peso 0.5 cada.
     vec3 b = fetchC(ip + ivec2(0, -1), hi);
     vec3 e = fetchC(ip + ivec2(-1, 0), hi);
     vec3 l = fetchC(ip + ivec2(2, 1), hi);
@@ -130,7 +114,6 @@ void main() {
     easuSet(dir, len, 0.5, bL, eL, fL, gL, jL);
     easuSet(dir, len, 0.5, gL, jL, kL, lL, oL);
     #else
-    // ---- Balanceado / Qualidade: 12 taps, 4 conjuntos EASU ponderados bilinearmente (igual ao v2).
     vec3 b = fetchC(ip + ivec2(0, -1), hi);
     vec3 c = fetchC(ip + ivec2(1, -1), hi);
     vec3 e = fetchC(ip + ivec2(-1, 0), hi);
@@ -152,9 +135,6 @@ void main() {
     float chromaStrength = 0.0;
     float chromaCoherence = 0.0;
     if (dirR < max(range * range * 1e-8, 1e-10)) {
-        // RGB structure tensor: combines signed gradients from all channels.
-        // Its principal eigenvector is the edge normal, including isoluminant edges
-        // that disappear in the EASU luma signal. This avoids picking one noisy channel.
         vec3 gxColor = mix(g - f, k - j, pp.y);
         vec3 gyColor = mix(j - f, k - g, pp.x);
         float jxx = dot(gxColor, gxColor);
@@ -169,7 +149,6 @@ void main() {
         float chromaR = dot(chromaDir, chromaDir);
         chromaCoherence = clamp(discJ / max(traceJ, 1e-8), 0.0, 1.0);
         if (lambdaMax > dirR * 64.0 && chromaR > 1e-12) {
-            // Keep the raw eigenvector here; the common path normalizes it once.
             dir = chromaDir;
             dirR = chromaR;
             chromaStrength = clamp(sqrt(max(lambdaMax, 0.0)) / max(range, 1e-4), 0.0, 1.0);
@@ -177,8 +156,6 @@ void main() {
         }
     }
     #if KRYOSS_MODE == 3
-    // A coherent edge has one dominant gradient eigenvalue; isotropic high-frequency
-    // noise has two similar eigenvalues. Keep a 35% floor to avoid deleting fine detail.
     vec2 gradLuma = vec2(mix(gL - fL, kL - jL, pp.y), mix(jL - fL, kL - gL, pp.x));
     float gx2 = gradLuma.x * gradLuma.x;
     float gy2 = gradLuma.y * gradLuma.y;
@@ -195,8 +172,6 @@ void main() {
     len = len * len;
     if (chromaFallback) {
         #if KRYOSS_MODE == 1
-        // The 8-tap tier uses a deliberately softer chroma fallback to avoid
-        // overfitting isolated one-pixel color noise.
         len = 0.0625 * chromaStrength * chromaStrength;
         #else
         len = 0.25 * chromaStrength * chromaStrength;
@@ -207,7 +182,6 @@ void main() {
     #endif
 #endif
 
-    // nucleo eliptico: estreita na direcao do gradiente, alarga ao longo da borda (como no EASU)
     float stretch = dot(dir, dir) / max(max(abs(dir.x), abs(dir.y)), 1e-5);
     vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
     float lob = uKryoss.y + (uKryoss.z - uKryoss.y) * len;
@@ -242,19 +216,13 @@ void main() {
     easuTap(acc, aw, vec2( 0.0,  2.0) - pp, dir, len2, lob, clp, n);
 #endif
 
-    // deringing por AABB do 2x2 central. v3: no modo Qualidade a caixa cresce com o contraste do canal
-    // (sobre-passo), deixando a borda mais crocante sem halo. Nos demais modos uKryoss2.y = 0 (caixa estrita, como no v2).
     vec3 os = rg * uKryoss2.y;
     vec3 lo = mn - os;
     vec3 hiB = mx + os;
-    // A failed/near-zero signed kernel sum must never amplify into wild colors.
     bool validWeight = abs(aw) > 1e-5 && !isnan(aw) && !isinf(aw);
     vec3 raw = validWeight ? (acc / aw) : soft;
     if (any(isnan(raw)) || any(isinf(raw))) raw = soft;
 
-    // Hue-preserving deringing: constrain the RGB correction with ONE shared
-    // scalar instead of clamping R/G/B independently. Independent clipping can
-    // rotate saturated colors and create colored fringes around hard edges.
     vec3 delta = raw - soft;
     float tR = delta.r > 1e-6 ? (hiB.r - soft.r) / delta.r :
                (delta.r < -1e-6 ? (lo.r - soft.r) / delta.r : 1.0);
@@ -263,8 +231,6 @@ void main() {
     float tB = delta.b > 1e-6 ? (hiB.b - soft.b) / delta.b :
                (delta.b < -1e-6 ? (lo.b - soft.b) / delta.b : 1.0);
     float limitT = clamp(min(min(tR, tG), tB), 0.0, 1.0);
-    // Adaptive sharpening without a second pass. Reuse the same three-channel
-    // gamut limit; this avoids six extra divisions in the fragment hot path.
     float m = smoothstep(0.10, 0.60, range);
     float kk = uKryoss.x + uKryoss2.x * (1.0 - m);
     float sharpT = clamp(kk, 0.0, limitT);

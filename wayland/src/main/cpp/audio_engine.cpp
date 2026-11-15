@@ -17,17 +17,12 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Audio configuration.
 static constexpr int kSampleRate = 48000;
 static constexpr int kChannelCount = 2;
 [[maybe_unused]] static constexpr int kBitsPerSample = 16;
-static constexpr int kRingBufferFrames = 16384;  // ~341ms at 48kHz
-static constexpr int kFramesPerBurst = 256;       // typical AAudio burst size
+static constexpr int kRingBufferFrames = 16384;
+static constexpr int kFramesPerBurst = 256;
 static constexpr int kMaxClients = 4;
-
-// ===========================================================================
-// AudioRingBuffer — MPSC ring buffer
-// ===========================================================================
 
 AudioRingBuffer::AudioRingBuffer(size_t capacity_frames, int channels)
     : capacity_(capacity_frames), channels_(channels) {
@@ -48,7 +43,6 @@ int AudioRingBuffer::write(const int16_t* data, int frames) {
     int total_samples = to_write * channels_;
     int buffer_samples = static_cast<int>(capacity_ * channels_);
 
-    // Compute contiguous region from current write position.
     int start_off = static_cast<int>((wi * channels_) % buffer_samples);
     int first_chunk = std::min(total_samples, buffer_samples - start_off);
     memcpy(buffer_ + start_off, data, first_chunk * sizeof(int16_t));
@@ -86,8 +80,6 @@ int AudioRingBuffer::read(int16_t* data, int frames) {
 int AudioRingBuffer::available_to_read() const {
     uint32_t wi = write_idx_.load(std::memory_order_acquire);
     uint32_t ri = read_idx_.load(std::memory_order_relaxed);
-    // Unsigned modular arithmetic — correct even across uint32_t wraparound
-    // as long as (wi - ri) <= capacity_.
     return static_cast<int>(wi - ri);
 }
 
@@ -104,12 +96,8 @@ void AudioRingBuffer::reset() {
     memset(buffer_, 0, sz * sizeof(int16_t));
 }
 
-// ===========================================================================
-// AAudio callback
-// ===========================================================================
-
 static aaudio_data_callback_result_t audio_data_callback(
-    AAudioStream* /*stream*/, void* userdata, void* audio_data, int32_t num_frames) {
+    AAudioStream* , void* userdata, void* audio_data, int32_t num_frames) {
     auto* eng = static_cast<AudioEngine*>(userdata);
     if (!eng || !eng->running.load() || eng->stopped_.load(std::memory_order_relaxed)) {
         return AAUDIO_CALLBACK_RESULT_STOP;
@@ -124,7 +112,6 @@ static aaudio_data_callback_result_t audio_data_callback(
     }
     if (active) eng->active_seq_.fetch_add(1, std::memory_order_relaxed);
 
-    // Apply volume.
     float vol = eng->volume.load(std::memory_order_relaxed);
     if (vol < 1.0f) {
         for (int i = 0; i < frames_read * kChannelCount; ++i) {
@@ -132,7 +119,6 @@ static aaudio_data_callback_result_t audio_data_callback(
         }
     }
 
-    // Fill remaining with silence if underrun.
     if (frames_read < num_frames) {
         memset(output + frames_read * kChannelCount, 0,
                (num_frames - frames_read) * kChannelCount * sizeof(int16_t));
@@ -141,40 +127,24 @@ static aaudio_data_callback_result_t audio_data_callback(
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
-static void audio_error_callback(AAudioStream* /*stream*/, void* userdata,
+static void audio_error_callback(AAudioStream* , void* userdata,
                                   aaudio_result_t error) {
     auto* eng = static_cast<AudioEngine*>(userdata);
     if (!eng) return;
     LOGE("AAudio error: %d (%s)", error, AAudio_convertResultToText(error));
-    // C13-09: AAudio docs state "stopping and closing the stream must be
-    // done on a separate thread" — calling requestStop from the error callback
-    // itself may deadlock (the callback holds an internal AAudio lock).
-    // Set stopped_=true so the data callback returns RESULT_STOP immediately
-    // (no more audio processing). audio_engine_destroy() on the main thread
-    // will call requestStop / close after noticing has_error.
-    eng->stopped_.store(true, std::memory_order_release);  // stops data callback
+    eng->stopped_.store(true, std::memory_order_release);
     eng->has_error.store(true, std::memory_order_release);
-    // Do NOT call AAudioStream_requestStop here.
 }
-
-// ===========================================================================
-// Socket server — accept FEX/Wine PCM client connections
-// ===========================================================================
 
 static void client_reader_thread(AudioEngine* eng, int client_fd) {
     LOGI("Audio client reader started (fd=%d)", client_fd);
 
-    // C13-10: set a receive timeout so the read loop unblocks within 1 second
-    // when the engine is shutting down (running=false), rather than blocking
-    // indefinitely and preventing join.
     struct timeval tv { .tv_sec = 1, .tv_usec = 0 };
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     int16_t buf[kFramesPerBurst * kChannelCount];
 
     while (eng->running.load(std::memory_order_relaxed)) {
-        // SOCK_STREAM may return fewer bytes than requested; loop until we
-        // have a full buffer or the connection drops.
         ssize_t total = 0;
         while (total < static_cast<ssize_t>(sizeof(buf))) {
             ssize_t n = read(client_fd,
@@ -187,7 +157,6 @@ static void client_reader_thread(AudioEngine* eng, int client_fd) {
                 total = 0;
                 break;
             } else if (errno != EINTR) {
-                // EAGAIN should not happen on a blocking socket, but handle it.
                 if (errno != EAGAIN) {
                     LOGW("Audio client read error (fd=%d): %s",
                          client_fd, strerror(errno));
@@ -195,7 +164,6 @@ static void client_reader_thread(AudioEngine* eng, int client_fd) {
                 total = 0;
                 break;
             }
-            // EINTR: retry the read.
         }
         if (total <= 0) break;
 
@@ -215,7 +183,6 @@ static void accept_thread(AudioEngine* eng) {
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    // C13-11: check path length before strncpy to catch truncation.
     if (eng->socket_path.size() >= sizeof(addr.sun_path)) {
         LOGE("Socket path too long (%zu >= %zu): %s",
              eng->socket_path.size(), sizeof(addr.sun_path),
@@ -226,7 +193,6 @@ static void accept_thread(AudioEngine* eng) {
     strncpy(addr.sun_path, eng->socket_path.c_str(), sizeof(addr.sun_path) - 1);
     addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
 
-    // Remove stale socket.
     unlink(eng->socket_path.c_str());
 
     eng->server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -236,7 +202,6 @@ static void accept_thread(AudioEngine* eng) {
         return;
     }
 
-    // Set permissions so FEX/Wine can connect (same uid/gid).
     if (bind(eng->server_fd, reinterpret_cast<struct sockaddr*>(&addr),
              sizeof(addr)) < 0) {
         LOGE("bind(%s) failed: %s", eng->socket_path.c_str(), strerror(errno));
@@ -246,7 +211,7 @@ static void accept_thread(AudioEngine* eng) {
         return;
     }
 
-    chmod(eng->socket_path.c_str(), 0660);  // C13-14: 0660 not 0666 (no world-write)
+    chmod(eng->socket_path.c_str(), 0660);
 
     if (listen(eng->server_fd, kMaxClients) < 0) {
         LOGE("listen() failed: %s", strerror(errno));
@@ -285,7 +250,6 @@ static void accept_thread(AudioEngine* eng) {
         }
     }
 
-    // Cleanup: close all client connections and wait for reader threads.
     {
         std::lock_guard<std::mutex> g(eng->clients_mutex);
         for (int fd : eng->client_fds) {
@@ -307,10 +271,6 @@ static void accept_thread(AudioEngine* eng) {
     LOGI("Audio accept thread exiting");
 }
 
-// ===========================================================================
-// Public API
-// ===========================================================================
-
 extern "C" AudioEngine* audio_engine_create(const char* data_dir) {
     if (!data_dir) return nullptr;
 
@@ -318,11 +278,9 @@ extern "C" AudioEngine* audio_engine_create(const char* data_dir) {
     eng->data_dir = data_dir;
     eng->socket_path = eng->data_dir + "/audio.sock";
 
-    // Create ring buffer.
     eng->ring_buffer = std::make_unique<AudioRingBuffer>(kRingBufferFrames,
                                                           kChannelCount);
 
-    // Build AAudio stream.
     aaudio_result_t result = AAudio_createStreamBuilder(&eng->aaudio_builder);
     if (result != AAUDIO_OK) {
         LOGE("AAudio_createStreamBuilder failed: %d", result);
@@ -331,9 +289,6 @@ extern "C" AudioEngine* audio_engine_create(const char* data_dir) {
     }
 
     AAudioStreamBuilder_setDirection(eng->aaudio_builder, AAUDIO_DIRECTION_OUTPUT);
-    // C13-12: Do not set a fixed sample rate; let AAudio choose the optimal
-    // native rate for the device (avoids resampling in hardware).  Remove
-    // AAudioStreamBuilder_setSampleRate; query actual rate after stream opens.
     AAudioStreamBuilder_setChannelCount(eng->aaudio_builder, kChannelCount);
     AAudioStreamBuilder_setFormat(eng->aaudio_builder, AAUDIO_FORMAT_PCM_I16);
     AAudioStreamBuilder_setPerformanceMode(eng->aaudio_builder,
@@ -355,7 +310,6 @@ extern "C" AudioEngine* audio_engine_create(const char* data_dir) {
         return nullptr;
     }
 
-    // C13-12: query the actual sample rate chosen by AAudio for logging.
     int32_t actual_rate = AAudioStream_getSampleRate(eng->aaudio_stream);
     LOGI("AAudio stream opened: actual %d Hz, %d ch, I16", actual_rate, kChannelCount);
 
@@ -371,7 +325,6 @@ extern "C" AudioEngine* audio_engine_create(const char* data_dir) {
     LOGI("AAudio stream started: %d Hz, %d ch, I16",
          kSampleRate, kChannelCount);
 
-    // Start socket server thread.
     eng->running.store(true, std::memory_order_release);
     eng->accept_thread = std::thread(accept_thread, eng);
 
@@ -384,17 +337,12 @@ extern "C" void audio_engine_destroy(AudioEngine* eng) {
 
     LOGI("Destroying audio engine");
 
-    // Signal all threads to stop.
     eng->running.store(false, std::memory_order_release);
 
-    // Close server socket to unblock accept().
     if (eng->server_fd >= 0) {
         ::shutdown(eng->server_fd, SHUT_RDWR);
     }
 
-    // C13-10: shutdown all client fds to unblock read() calls in reader threads.
-    // Combined with SO_RCVTIMEO (set in client_reader_thread) this ensures
-    // reader threads exit promptly without blocking indefinitely on read().
     {
         std::lock_guard<std::mutex> g(eng->clients_mutex);
         for (int fd : eng->client_fds) {
@@ -402,18 +350,11 @@ extern "C" void audio_engine_destroy(AudioEngine* eng) {
         }
     }
 
-    // Wait for accept thread.
     if (eng->accept_thread.joinable()) eng->accept_thread.join();
 
-    // C13-07: Set stopped_ BEFORE requestStop so the data callback sees
-    // stopped_=true and returns AAUDIO_CALLBACK_RESULT_STOP immediately.
-    // Reversing this order (requestStop then store) is a TOCTOU bug: a
-    // callback between the two sees stopped_=false and accesses the engine.
     if (eng->aaudio_stream) {
         eng->stopped_.store(true, std::memory_order_release);
         AAudioStream_requestStop(eng->aaudio_stream);
-        // Known Android AAudio bug: callbacks may fire after requestStop()
-        // returns. Wait for any in-flight callbacks to drain.
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         AAudioStream_close(eng->aaudio_stream);
         eng->aaudio_stream = nullptr;
@@ -422,9 +363,6 @@ extern "C" void audio_engine_destroy(AudioEngine* eng) {
         AAudioStreamBuilder_delete(eng->aaudio_builder);
         eng->aaudio_builder = nullptr;
     }
-
-    // Ring buffer is automatically cleaned up by unique_ptr.
-    // Client threads are joined inside accept_thread on exit.
 
     LOGI("Audio engine destroyed");
     delete eng;
@@ -440,8 +378,6 @@ extern "C" bool audio_engine_is_active(AudioEngine* eng) {
     uint64_t seq = eng->active_seq_.load(std::memory_order_relaxed);
     if (seq == 0) return false;
 
-    // Track the last-seen sequence + wall time on the calling thread.
-    // No syscall is made in the real-time audio callback — only here.
     struct ActiveTracker {
         uint64_t last_seq = 0;
         std::chrono::steady_clock::time_point last_time{};
@@ -463,5 +399,4 @@ extern "C" void audio_engine_set_volume(AudioEngine* eng, float volume) {
     if (volume > 1.0f) volume = 1.0f;
     eng->volume.store(volume, std::memory_order_relaxed);
 }
-
 

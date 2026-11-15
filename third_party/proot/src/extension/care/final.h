@@ -27,4 +27,4 @@
 
 extern int finalize_care(Care * care);
 
-#endif				/* CARE_FINAL_H */
+#endif

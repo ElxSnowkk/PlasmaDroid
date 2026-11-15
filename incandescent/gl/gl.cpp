@@ -8,29 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-
-// The program, VAO and VBO belong to the context that created them. They used to
-// be three process-wide names behind an `if (program) return;` guard, so once the
-// application destroyed and recreated its EGL context the guard still saw
-// non-zero names and skipped re-creation for the rest of the process --
-// DrawDepthClearTri went on binding names the new context never made and the
-// ANGLE depth-clear workaround silently stopped doing anything.
-//
-// Kept per context rather than invalidated on switch: invalidating would make two
-// alternating contexts recompile and relink the program on every switch, and
-// orphan the previous one each time. Nothing is deleted when an entry is dropped,
-// for the reason multidraw_check_context() gives -- the objects belong to a
-// context that may already be gone, and deleting them against whichever context
-// is current now would delete somebody else's names.
-// Held by pointer, because the reference this table hands out outlives the lock.
-// A caller keeps the depth_clear_objects_t& across GL calls while another thread
-// can be adding its own context, and the map moves its elements when it grows.
-// The unique_ptr is what stays put; the map is free to rehash around it.
-
 #include "../includes.h"
 #include <GL/gl.h>
 #include <cmath>

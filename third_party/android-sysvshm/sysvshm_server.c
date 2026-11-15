@@ -1,20 +1,3 @@
-/*
- * sysvshm_server — broker de memória compartilhada estilo SysV para o guest Debian do PlasmaDroid.
- *
- * O Android bloqueia shmget/shmat (seccomp). Este processo cria a memória com ASharedMemory
- * (memfd/ashmem) e entrega o descritor aos clientes por SCM_RIGHTS; a libandroid-sysvshm.so,
- * carregada por LD_PRELOAD no guest, traduz shmget/shmat/shmdt/shmctl para este protocolo.
- *
- * Diferenças para o servidor do Winlator (que só atende o próprio processo):
- *   - qualquer processo do guest pode fazer shmat() de um shmid criado por outro (MIT-SHM:
- *     o cliente X cria, o Xwayland anexa);
- *   - chaves != IPC_PRIVATE (ftok);
- *   - contagem de anexos por pid + limpeza de pids mortos, então IPC_RMID logo após o shmat
- *     (padrão comum) só libera a memória quando o último processo desanexa.
- *
- * Uso:  libsysvshm-server.so <caminho-do-socket> [-f]
- *   -f  não faz fork/daemonização (o app já controla o processo)
- */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
@@ -43,13 +26,13 @@
 #define MAX_SEGMENTS 8192
 #define MAX_CLIENTS  256
 #define REAP_PERIOD_MS 5000
-#define MAX_SEG_SIZE (1ULL << 31) /* 2 GiB por segmento */
+#define MAX_SEG_SIZE (1ULL << 31)
 
 struct attach { pid_t pid; int count; };
 
 struct segment {
     int      id;
-    int      key;       /* 0 = IPC_PRIVATE */
+    int      key;
     int      fd;
     size_t   size;
     int      removed;
@@ -66,8 +49,6 @@ static int next_id = 1;
 static uid_t my_uid;
 static volatile sig_atomic_t quit_flag;
 
-/* ---------- criação da memória ---------- */
-
 typedef int (*ashm_create_fn)(const char *, size_t);
 
 static int create_region(size_t size) {
@@ -82,13 +63,11 @@ static int create_region(size_t size) {
         int fd = fn("plasma-sysv", size);
         if (fd >= 0) return fd;
     }
-    int fd = (int)syscall(SYS_memfd_create, "plasma-sysv", 1u /* MFD_CLOEXEC */);
+    int fd = (int)syscall(SYS_memfd_create, "plasma-sysv", 1u );
     if (fd < 0) return -1;
     if (ftruncate(fd, (off_t)size) < 0) { int e = errno; close(fd); errno = e; return -1; }
     return fd;
 }
-
-/* ---------- tabela ---------- */
 
 static struct segment *find_id(int id) {
     for (int i = 0; i < seg_count; i++) if (segs[i]->id == id) return segs[i];
@@ -139,7 +118,6 @@ static int pid_alive(pid_t pid) {
     return kill(pid, 0) == 0 || errno == EPERM;
 }
 
-/* Remove anexos de processos que morreram sem shmdt (crash, SIGKILL). */
 static void reap_dead(void) {
     for (int i = seg_count - 1; i >= 0; i--) {
         struct segment *s = segs[i];
@@ -151,8 +129,6 @@ static void reap_dead(void) {
         maybe_collect(i);
     }
 }
-
-/* ---------- operações ---------- */
 
 static void fill_info(struct sysvshm_resp *r, const struct segment *s) {
     r->size = s->size; r->nattch = total_attach(s); r->key = s->key;
@@ -208,7 +184,7 @@ static int do_detach(const struct sysvshm_req *q, pid_t peer) {
         struct segment *s = segs[i];
         if (s->id != q->id) continue;
         struct attach *a = attach_slot(s, peer, 0);
-        if (!a && s->nattach_len > 0) a = &s->attaches[0]; /* filho de fork desanexando o mapa herdado */
+        if (!a && s->nattach_len > 0) a = &s->attaches[0];
         if (a && a->count > 0) {
             a->count--;
             if (a->count == 0) {
@@ -219,14 +195,14 @@ static int do_detach(const struct sysvshm_req *q, pid_t peer) {
         maybe_collect(i);
         return 0;
     }
-    return 0; /* shmdt de segmento já coletado não é erro */
+    return 0;
 }
 
 static int do_rmid(const struct sysvshm_req *q) {
     for (int i = 0; i < seg_count; i++) {
         if (segs[i]->id != q->id) continue;
         segs[i]->removed = 1;
-        segs[i]->key = 0; /* a chave some imediatamente, como no kernel */
+        segs[i]->key = 0;
         maybe_collect(i);
         return 0;
     }
@@ -239,8 +215,6 @@ static int do_stat(const struct sysvshm_req *q, struct sysvshm_resp *r) {
     fill_info(r, s);
     return 0;
 }
-
-/* ---------- I/O ---------- */
 
 static int read_full(int fd, void *buf, size_t n) {
     size_t got = 0;
@@ -271,7 +245,6 @@ static int send_resp(int fd, const struct sysvshm_resp *r, int pass_fd) {
     }
 }
 
-/* Atende um pedido. Retorna 0 = continua, -1 = fecha a conexão. */
 static int serve_one(int fd) {
     struct sysvshm_req q;
     int rd = read_full(fd, &q, sizeof(q));
@@ -280,7 +253,7 @@ static int serve_one(int fd) {
     struct ucred cred;
     socklen_t cl = sizeof(cred);
     if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &cl) < 0) return -1;
-    if (cred.uid != my_uid) return -1; /* só o próprio app */
+    if (cred.uid != my_uid) return -1;
 
     struct sysvshm_resp r;
     memset(&r, 0, sizeof(r));
@@ -295,7 +268,6 @@ static int serve_one(int fd) {
     case SYSVSHM_OP_PING:   r.status = SYSVSHM_PROTO_VERSION; break;
     default:                r.status = -ENOSYS; break;
     }
-    /* GET devolve o id em status; os campos de fill_info já estão em r. */
     if (r.status < 0) { r.size = 0; r.nattch = 0; }
     return send_resp(fd, &r, r.status == 0 ? pass : -1);
 }
@@ -330,8 +302,6 @@ int main(int argc, char **argv) {
     struct sigaction sa; memset(&sa, 0, sizeof(sa));
     sa.sa_handler = on_signal;
     sigaction(SIGTERM, &sa, NULL); sigaction(SIGINT, &sa, NULL); sigaction(SIGHUP, &sa, NULL);
-    /* PR_SET_PDEATHSIG seguiria a *thread* que criou o processo (no app, uma thread de coroutine),
-       então a vigilância do pai é feita no tick do poll: se o ppid mudar, o app morreu. */
     const pid_t parent = getppid();
     time_t last_reap = 0;
 

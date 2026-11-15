@@ -1,4 +1,3 @@
-// Generated from KryoAS_Reconstruct.frag; do not edit.
 static const char kKryoASReconstruct[] = R"KRYOAS(#version 300 es
 // KryoAS pass 1: edge-directed reconstruction + bounded anti-ringing.
 // Input is the renderer's color buffer only. No depth, motion vectors or engine data.

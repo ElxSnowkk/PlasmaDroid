@@ -20,11 +20,11 @@
  * 02110-1301 USA.
  */
 
-#include <errno.h>		/* errno, */
-#include <string.h>		/* strerror(3), */
-#include <stdarg.h>		/* va_*, */
-#include <stdio.h>		/* vfprintf(3), */
-#include <limits.h>		/* INT_MAX, */
+#include <errno.h>
+#include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <limits.h>
 
 #include "cli/note.h"
 #include "tracee/tracee.h"
@@ -32,10 +32,6 @@
 int global_verbose_level;
 const char *global_tool_name;
 
-/**
- * Print @message to the standard error stream according to its
- * @severity and @origin.
- */
 void note(const Tracee *tracee, Severity severity, Origin origin,
 	  const char *message, ...)
 {

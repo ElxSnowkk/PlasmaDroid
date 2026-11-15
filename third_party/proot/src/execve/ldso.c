@@ -20,13 +20,13 @@
  * 02110-1301 USA.
  */
 
-#include <stdbool.h>		/* bool, true, false, */
-#include <string.h>		/* strlen(3), strcpy(3), strcat(3), strcmp(3), */
-#include <stdlib.h>		/* getenv(3), */
-#include <assert.h>		/* assert(3), */
-#include <errno.h>		/* ENOMEM, */
-#include <unistd.h>		/* close(2), */
-#include <linux/limits.h>	/* PATH_MAX, ARG_MAX, */
+#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <errno.h>
+#include <unistd.h>
+#include <linux/limits.h>
 
 #include "execve/ldso.h"
 #include "execve/elf.h"
@@ -34,9 +34,6 @@
 #include "tracee/tracee.h"
 #include "cli/note.h"
 
-/**
- * Check if the environment @variable has the given @name.
- */
 bool is_env_name(const char *variable, const char *name)
 {
     size_t length = strlen(name);
@@ -47,12 +44,6 @@ bool is_env_name(const char *variable, const char *name)
 	    && strncmp(variable, name, length) == 0);
 }
 
-/**
- * This function returns 1 or 0 depending on the equivalence of the
- * @reference environment variable and the one pointed to by the entry
- * in @envp at the given @index, otherwise it returns -errno when an
- * error occured.
- */
 int compare_xpointee_env(ArrayOfXPointers *envp, size_t index,
 			 const char *reference)
 {
@@ -71,33 +62,6 @@ int compare_xpointee_env(ArrayOfXPointers *envp, size_t index,
     return (int) is_env_name(value, reference);
 }
 
-/**
- * This function ensures that environment variables related to the
- * dynamic linker are applied to the emulated program, not to QEMU
- * itself.  For instance, let's say the user has entered the
- * command-line below:
- *
- *     env LD_TRACE_LOADED_OBJECTS=1 /bin/ls
- *
- * It should be converted to:
- *
- *     qemu -E LD_TRACE_LOADED_OBJECTS=1 /bin/ls
- *
- * instead of:
- *
- *     env LD_TRACE_LOADED_OBJECTS=1 qemu /bin/ls
- *
- * Note that the LD_LIBRARY_PATH variable is always required to run
- * QEMU (a host binary):
- *
- *     env LD_LIBRARY_PATH=... qemu -U LD_LIBRARY_PATH /bin/ls
- *
- * or when LD_LIBRARY_PATH was also specified by the user:
- *
- *     env LD_LIBRARY_PATH=... qemu -E LD_LIBRARY_PATH=... /bin/ls
- *
- * This funtion returns -errno if an error occured, otherwise 0.
- */
 int ldso_env_passthru(const Tracee *tracee, ArrayOfXPointers *envp,
 		      ArrayOfXPointers *argv, const char *define,
 		      const char *undefine, size_t offset)
@@ -114,13 +78,9 @@ int ldso_env_passthru(const Tracee *tracee, ArrayOfXPointers *envp,
 	if (status < 0)
 	    return status;
 
-	/* Skip variables that do not start with "LD_".  */
 	if (env == NULL || strncmp(env, "LD_", sizeof("LD_") - 1) != 0)
 	    continue;
 
-	/* When a host program executes a guest program, use
-	 * the value of LD_LIBRARY_PATH as it was before being
-	 * swapped by the mixed-mode support.  */
 	if (tracee->host_ldso_paths != NULL
 	    && tracee->guest_ldso_paths != NULL
 	    && is_env_name(env, "LD_LIBRARY_PATH")
@@ -130,7 +90,7 @@ int ldso_env_passthru(const Tracee *tracee, ArrayOfXPointers *envp,
 #define PASSTHRU(check, name)						\
 		if (is_env_name(env, name)) {				\
 			check |= true;					\
-			/* Errors are not fatal here.  */		\
+					\
 			status = resize_array_of_xpointers(argv, offset, 2);	\
 			if (status >= 0) {				\
 				status = write_xpointees(argv, offset, 2, define, env); \
@@ -166,7 +126,6 @@ int ldso_env_passthru(const Tracee *tracee, ArrayOfXPointers *envp,
     }
 
     if (!has_seen_library_path) {
-	/* Errors are not fatal here.  */
 	status = resize_array_of_xpointers(argv, offset, 2);
 	if (status >= 0) {
 	    status =
@@ -180,10 +139,6 @@ int ldso_env_passthru(const Tracee *tracee, ArrayOfXPointers *envp,
     return 0;
 }
 
-/**
- * Add to @host_ldso_paths the list of @paths prefixed with the path
- * to the host rootfs.
- */
 static int add_host_ldso_paths(char host_ldso_paths[ARG_MAX],
 			       const char *paths)
 {
@@ -204,7 +159,6 @@ static int add_host_ldso_paths(char host_ldso_paths[ARG_MAX],
 	if (is_absolute)
 	    length1 += strlen(HOST_ROOTFS);
 
-	/* Check there's enough room.  */
 	if (cursor1 + length1 >= host_ldso_paths + ARG_MAX)
 	    return -ENOEXEC;
 
@@ -213,12 +167,6 @@ static int add_host_ldso_paths(char host_ldso_paths[ARG_MAX],
 	    cursor1++;
 	}
 
-	/* Since we are executing a host binary under a
-	 * QEMUlated environment, we have to access its
-	 * library paths through the "host-rootfs" binding.
-	 * Technically it means a path like "/lib" is accessed
-	 * as "${HOST_ROOTFS}/lib" to avoid conflict with the
-	 * guest "/lib".  */
 	if (is_absolute) {
 	    strcpy(cursor1, HOST_ROOTFS);
 	    cursor1 += strlen(HOST_ROOTFS);
@@ -241,12 +189,6 @@ struct find_program_header_data {
     uint64_t address;
 };
 
-/**
- * This function is a program header iterator.  It stops the iteration
- * (by returning 1) once it has found a program header that matches
- * @data.  This function returns -errno if an error occurred,
- * otherwise 0 or 1.
- */
 static int find_program_header(const ElfHeader *elf_header,
 			       const ProgramHeader *program_header,
 			       void *data_)
@@ -273,11 +215,6 @@ static int find_program_header(const ElfHeader *elf_header,
     return 0;
 }
 
-/**
- * Add to @xpaths the paths (':'-separated list) from the file
- * referenced by @fd at the given @offset.  This function returns
- * -errno if an error occured, otherwise 0.
- */
 static int add_xpaths(const Tracee *tracee, int fd, uint64_t offset,
 		      char **xpaths)
 {
@@ -292,7 +229,6 @@ static int add_xpaths(const Tracee *tracee, int fd, uint64_t offset,
     if (status < 0)
 	return -errno;
 
-    /* Read the complete list of paths.  */
     length = 0;
     paths = NULL;
     do {
@@ -310,7 +246,6 @@ static int add_xpaths(const Tracee *tracee, int fd, uint64_t offset,
 	length += strnlen(paths + length, 1024);
     } while (length == size);
 
-    /* Concatene this list of paths to xpaths.  */
     if (!*xpaths) {
 	*xpaths = talloc_array(tracee->ctx, char, length + 1);
 	if (!*xpaths)
@@ -319,7 +254,7 @@ static int add_xpaths(const Tracee *tracee, int fd, uint64_t offset,
 	strcpy(*xpaths, paths);
     } else {
 	length += strlen(*xpaths);
-	length++;		/* ":" separator */
+	length++;
 
 	tmp = talloc_realloc(tracee->ctx, *xpaths, char, length + 1);
 	if (!tmp)
@@ -330,17 +265,9 @@ static int add_xpaths(const Tracee *tracee, int fd, uint64_t offset,
 	strcat(*xpaths, paths);
     }
 
-    /* I don't know if DT_R*PATH entries are unique.  In
-     * doubt I support multiple entries.  */
     return 0;
 }
 
-/**
- * Put the RPATH and RUNPATH dynamic entries from the file referenced
- * by @fd -- which has the provided @elf_header -- in @rpaths and
- * @runpaths respectively.  This function returns -errno if an error
- * occured, otherwise 0.
- */
 static int read_ldso_rpaths(const Tracee *tracee, int fd,
 			    const ElfHeader *elf_header, char **rpaths,
 			    char **runpaths)
@@ -380,15 +307,12 @@ static int read_ldso_rpaths(const Tracee *tracee, int fd,
     if (sizeof_dynamic_segment % sizeof_dynamic_entry != 0)
 	return -ENOEXEC;
 
-/**
- * Invoke @embedded_code on each dynamic entry of the given @type.
- */
 #define FOREACH_DYNAMIC_ENTRY(type, embedded_code)					\
 	for (i = 0; i < sizeof_dynamic_segment / sizeof_dynamic_entry; i++) {		\
 		DynamicEntry dynamic_entry;						\
 		uint64_t value;								\
 											\
-		/* embedded_code may change the file offset.  */			\
+					\
 		status = (int) lseek(fd, offsetof_dynamic_segment + i * sizeof_dynamic_entry, \
 				SEEK_SET);						\
 		if (status < 0)								\
@@ -406,9 +330,6 @@ static int read_ldso_rpaths(const Tracee *tracee, int fd,
 		embedded_code								\
 	}
 
-    /* Get the address of the *first* string table.  The ELF
-     * specification doesn't mention if it may have several string
-     * table references.  */
     FOREACH_DYNAMIC_ENTRY(DT_STRTAB, {
 			  strtab_address = value; break;}
     )
@@ -419,7 +340,6 @@ static int read_ldso_rpaths(const Tracee *tracee, int fd,
     data.type = PT_LOAD;
     data.address = strtab_address;
 
-    /* Search the program header that contains the given string table.  */
     status =
 	iterate_program_headers(tracee, fd, elf_header,
 				find_program_header, &data);
@@ -456,12 +376,6 @@ static int read_ldso_rpaths(const Tracee *tracee, int fd,
 	return 0;
 }
 
-/**
- * Rebuild the variable LD_LIBRARY_PATH in @envp for the program
- * @host_path according to its RPATH, RUNPATH, and the initial
- * LD_LIBRARY_PATH.  This function returns -errno if an error occured,
- * 1 if RPATH/RUNPATH entries were found, 0 otherwise.
- */
 int rebuild_host_ldso_paths(Tracee *tracee, const char host_path[PATH_MAX],
 			    ArrayOfXPointers *envp)
 {
@@ -490,35 +404,28 @@ int rebuild_host_ldso_paths(Tracee *tracee, const char host_path[PATH_MAX],
     if (status < 0)
 	return status;
 
-    /* 1. DT_RPATH  */
     if (rpaths && !runpaths) {
 	status = add_host_ldso_paths(host_ldso_paths, rpaths);
 	if (status < 0)
-	    return 0;		/* Not fatal.  */
+	    return 0;
 	rpath_found = true;
     }
 
-    /* 2. LD_LIBRARY_PATH  */
     if (initial_ldso_paths == NULL)
 	initial_ldso_paths = strdup(getenv("LD_LIBRARY_PATH") ? : "/");
     if (initial_ldso_paths != NULL && initial_ldso_paths[0] != '\0') {
 	status = add_host_ldso_paths(host_ldso_paths, initial_ldso_paths);
 	if (status < 0)
-	    return 0;		/* Not fatal.  */
+	    return 0;
     }
 
-    /* 3. DT_RUNPATH  */
     if (runpaths) {
 	status = add_host_ldso_paths(host_ldso_paths, runpaths);
 	if (status < 0)
-	    return 0;		/* Not fatal.  */
+	    return 0;
 	rpath_found = true;
     }
 
-    /* 4. /etc/ld.so.cache NYI.  */
-
-    /* 5. /lib[32|64], /usr/lib[32|64] + /usr/local/lib[32|64]  */
-    /* 6. /lib, /usr/lib + /usr/local/lib  */
     if (IS_CLASS32(elf_header))
 	status = add_host_ldso_paths(host_ldso_paths,
 #if defined(ARCH_X86) || defined(ARCH_X86_64)
@@ -536,48 +443,37 @@ int rebuild_host_ldso_paths(Tracee *tracee, const char host_path[PATH_MAX],
 				     "/lib64:/usr/lib64:/usr/local/lib64"
 				     ":/lib:/usr/lib:/usr/local/lib");
     if (status < 0)
-	return 0;		/* Not fatal.  */
+	return 0;
 
     status = find_xpointee(envp, "LD_LIBRARY_PATH");
     if (status < 0)
-	return 0;		/* Not fatal.  */
+	return 0;
     index = (size_t) status;
 
     if (index == envp->length) {
-	/* Allocate a new entry at the end of envp[] when
-	 * LD_LIBRARY_PATH was not found.  */
 
 	index = (envp->length > 0 ? envp->length - 1 : 0);
 	status = resize_array_of_xpointers(envp, index, 1);
 	if (status < 0)
-	    return 0;		/* Not fatal.  */
+	    return 0;
     } else if (tracee->guest_ldso_paths == NULL) {
-	/* Remember guest LD_LIBRARY_PATH in order to restore
-	 * it when a host program will execute a guest
-	 * program.  */
 	char *env;
 
-	/* Errors are not fatal here.  */
 	status = read_xpointee_as_string(envp, index, &env);
 	if (status >= 0)
 	    tracee->guest_ldso_paths = talloc_strdup(tracee, env);
     }
 
-    /* Forge the new LD_LIBRARY_PATH variable from
-     * host_ldso_paths.  */
     length1 = strlen("LD_LIBRARY_PATH=");
     length2 = strlen(host_ldso_paths);
     if (ARG_MAX - length2 - 1 < length1)
-	return 0;		/* Not fatal.  */
+	return 0;
 
     memmove(host_ldso_paths + length1, host_ldso_paths, length2 + 1);
     memcpy(host_ldso_paths, "LD_LIBRARY_PATH=", length1);
 
     write_xpointee(envp, index, host_ldso_paths);
 
-    /* The guest LD_LIBRARY_PATH will be restored only if the host
-     * program didn't change it explicitly, so remember its
-     * initial value.  */
     if (tracee->host_ldso_paths == NULL)
 	tracee->host_ldso_paths = talloc_strdup(tracee, host_ldso_paths);
 

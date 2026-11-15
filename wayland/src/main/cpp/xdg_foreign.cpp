@@ -1,22 +1,3 @@
-// xdg_foreign.cpp — xdg-foreign-unstable-v2 (zxdg_exporter_v2 / zxdg_importer_v2).
-//
-// Lets a client export a toplevel surface as an opaque handle string which
-// another — possibly cross-process — client imports to establish a parent/child
-// window relationship with the same semantics as xdg_toplevel.set_parent.
-//
-// WHY THIS EXISTS
-//   Wine's winewayland.drv presents a window whose content lives in a different
-//   Wine process by making it a wl_subsurface of the owner's wl_surface. A
-//   wl_subsurface's parent must belong to the SAME Wayland client, so across
-//   processes winewayland cannot resolve the owner surface, the child window
-//   never receives a role, and it never maps. Steam is exactly this shape:
-//   steamwebhelper.exe (CEF) renders the UI in a separate process from
-//   steam.exe and reparents its content windows cross-process. With
-//   xdg-foreign available, a patched winewayland can export the parent
-//   toplevel from steam.exe and import it in steamwebhelper.exe to link the
-//   CEF window, so the compositor sees and maps it.
-//
-// Generated header: protocols/xdg-foreign-protocol.h (server-side).
 
 #include "labwc.h"
 
@@ -42,39 +23,25 @@ extern State* g_state;
 static constexpr uint32_t XDG_EXPORTER_VERSION = 1;
 static constexpr uint32_t XDG_IMPORTER_VERSION = 1;
 
-// One record per exported handle. `imports` tracks live zxdg_imported_v2
-// resources so we can send `destroyed` to each when the export goes away.
-// `surface` is only ever compared by identity against live toplevels — it is
-// never dereferenced — so a surface destroyed while still exported cannot
-// cause a use-after-free here.
 struct ExportRec {
     Surface*                  surface = nullptr;
     wl_resource*              exported_res = nullptr;
     std::vector<wl_resource*> imports;
 };
 
-// handle string -> ExportRec. Entries are erased when the zxdg_exported_v2
-// resource is destroyed (client-driven or on display teardown).
 static std::unordered_map<std::string, ExportRec> s_exports;
 
-// zxdg_imported_v2 user_data: which export handle this import references.
 struct ImportRec {
     std::string handle;
 };
 
-// Monotonic; no RNG/clock needed — uniqueness within a compositor run suffices.
 static uint64_t s_handle_counter = 0;
 
-// Find the Toplevel owning a given Surface. scene_mutex must be held.
 static Toplevel* toplevel_for_surface_locked(State* st, Surface* s) {
     if (!s) return nullptr;
     for (auto& t : st->toplevels) if (t->surface == s) return t.get();
     return nullptr;
 }
-
-// ===========================================================================
-// zxdg_exported_v2
-// ===========================================================================
 
 static void exported_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 
@@ -83,22 +50,16 @@ static const struct zxdg_exported_v2_interface exported_impl = {
 };
 
 static void exported_resource_destroy(wl_resource* r) {
-    // user_data is a heap std::string* holding this export's handle.
     auto* handle = static_cast<std::string*>(wl_resource_get_user_data(r));
     if (!handle) return;
     auto it = s_exports.find(*handle);
     if (it != s_exports.end()) {
-        // Revoke: tell every importer the relationship is now invalid.
         for (wl_resource* imp : it->second.imports)
             zxdg_imported_v2_send_destroyed(imp);
         s_exports.erase(it);
     }
     delete handle;
 }
-
-// ===========================================================================
-// zxdg_exporter_v2
-// ===========================================================================
 
 static void exporter_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 
@@ -122,7 +83,6 @@ static void exporter_export_toplevel(wl_client* c, wl_resource*,
 
     wl_resource_set_implementation(r, &exported_impl, handle,
                                    exported_resource_destroy);
-    // Spec: xdg_exported.handle is sent immediately after export.
     zxdg_exported_v2_send_handle(r, handle->c_str());
     LOGI("export_toplevel: surface=%p handle=%s", (void*)s, handle->c_str());
 }
@@ -131,10 +91,6 @@ static const struct zxdg_exporter_v2_interface exporter_impl = {
     exporter_destroy,
     exporter_export_toplevel,
 };
-
-// ===========================================================================
-// zxdg_imported_v2
-// ===========================================================================
 
 static void imported_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 
@@ -159,8 +115,6 @@ static void imported_set_parent_of(wl_client*, wl_resource* r,
     Toplevel* pt = toplevel_for_surface_locked(st, parent);
     if (ct) {
         ct->foreign_parent = parent;
-        // Keep the child stacked above its foreign parent (Steam CEF content
-        // windows must sit over their container).
         if (pt && ct->z_order <= pt->z_order) ct->z_order = st->next_z_order++;
         LOGI("set_parent_of: child_tl=%p parent_surface=%p (parent_tl=%p)",
              (void*)ct, (void*)parent, (void*)pt);
@@ -185,10 +139,6 @@ static void imported_resource_destroy(wl_resource* r) {
     delete imp;
 }
 
-// ===========================================================================
-// zxdg_importer_v2
-// ===========================================================================
-
 static void importer_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 
 static void importer_import_toplevel(wl_client* c, wl_resource*,
@@ -204,7 +154,6 @@ static void importer_import_toplevel(wl_client* c, wl_resource*,
 
     auto it = s_exports.find(imp->handle);
     if (it == s_exports.end()) {
-        // Unknown handle — signal immediately that no relation can be set up.
         LOGW("import_toplevel: unknown handle %s -> destroyed", imp->handle.c_str());
         zxdg_imported_v2_send_destroyed(r);
         return;
@@ -217,10 +166,6 @@ static const struct zxdg_importer_v2_interface importer_impl = {
     importer_destroy,
     importer_import_toplevel,
 };
-
-// ===========================================================================
-// globals
-// ===========================================================================
 
 static void exporter_bind(wl_client* c, void*, uint32_t ver, uint32_t id) {
     wl_resource* r = wl_resource_create(c, &zxdg_exporter_v2_interface,

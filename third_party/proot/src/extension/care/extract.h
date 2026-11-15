@@ -36,4 +36,4 @@ PACKED AutoExtractInfo;
 
 extern int WEAK extract_archive_from_file(const char *path);
 
-#endif				/* EXTRACT_H */
+#endif

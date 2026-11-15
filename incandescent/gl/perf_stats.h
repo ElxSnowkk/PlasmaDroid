@@ -9,8 +9,6 @@
 // Estatísticas opcionais para MEDIR o efeito dos ajustes (chave "perfStats" do config.json; 0 = desligado, padrão).
 // Hoje: tradução de shaders (glslang + SPIRV-Cross) — acertos/erros do cache de GLSL e tempo gasto. Resumo no log a cada ~10 s.
 
-// Chamado ao fim de cada tradução de GLSL (cacheHit = veio do cache; ms = tempo total da chamada).
-
 #ifndef INCANDESCENT_PERF_STATS_H
 #define INCANDESCENT_PERF_STATS_H
 

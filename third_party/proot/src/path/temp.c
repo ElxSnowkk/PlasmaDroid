@@ -1,19 +1,15 @@
-#include <sys/types.h>		/* stat(2), opendir(3), */
-#include <sys/stat.h>		/* stat(2), chmod(2), */
-#include <unistd.h>		/* stat(2), rmdir(2), unlink(2), readlink(2), */
-#include <errno.h>		/* errno(2), */
-#include <dirent.h>		/* readdir(3), opendir(3), */
-#include <string.h>		/* strcmp(3), */
-#include <stdlib.h>		/* free(3), getenv(3), */
-#include <stdio.h>		/* P_tmpdir, */
-#include <talloc.h>		/* talloc(3), */
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <errno.h>
+#include <dirent.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <talloc.h>
 
 #include "cli/note.h"
 
-/**
- * Return the path to a directory where temporary files should be
- * created.
- */
 const char *get_temp_directory()
 {
     static const char *temp_directory = NULL;
@@ -47,10 +43,6 @@ const char *get_temp_directory()
     return temp_directory;
 }
 
-/**
- * Handle the return of d_type = DT_UNKNOWN by readdir(3)
- * Not all filesystems support returning d_type in readdir(3)
- */
 static int get_dtype(struct dirent *de)
 {
     int dtype = de ? de->d_type : DT_UNKNOWN;
@@ -69,16 +61,6 @@ static int get_dtype(struct dirent *de)
     return dtype;
 }
 
-/**
- * Remove recursively the content of the current working directory.
- * This latter has to lie in temp_directory (ie. "/tmp" on most
- * systems).  This function returns -1 if a fatal error occured
- * (ie. the recursion must be stopped), the number of non-fatal errors
- * otherwise.
- *
- * WARNING: this function changes the current working directory for
- * the calling process.
- */
 static int clean_temp_cwd()
 {
     const char *temp_directory = get_temp_directory();
@@ -95,8 +77,6 @@ static int clean_temp_cwd()
 	goto end;
     }
 
-    /* Sanity check: ensure the current directory lies in
-     * "/tmp".  */
     status = readlink("/proc/self/cwd", prefix, length_temp_directory);
     if (status < 0) {
 	note(NULL, WARNING, SYSTEM, "can't readlink '/proc/self/cwd'");
@@ -148,7 +128,6 @@ static int clean_temp_cwd()
 		continue;
 	    }
 
-	    /* Recurse.  */
 	    status = clean_temp_cwd();
 	    if (status < 0) {
 		nb_errors = -1;
@@ -188,11 +167,6 @@ static int clean_temp_cwd()
     return nb_errors;
 }
 
-/**
- * Remove recursively @path.  This latter has to be a directory lying
- * in temp_directory (ie. "/tmp" on most systems).  This function
- * returns -1 on error, otherwise 0.
- */
 static int remove_temp_directory2(const char *path)
 {
     int result;
@@ -223,7 +197,6 @@ static int remove_temp_directory2(const char *path)
     status = clean_temp_cwd();
     result = (status == 0 ? 0 : -1);
 
-    /* Try to remove path even if something went wrong.  */
     status = chdir("..");
     if (status < 0) {
 	note(NULL, ERROR, SYSTEM, "can't chdir to '..'");
@@ -251,22 +224,12 @@ static int remove_temp_directory2(const char *path)
     return result;
 }
 
-/**
- * Like remove_temp_directory2() but always return 0.
- *
- * Note: this is a talloc destructor.
- */
 static int remove_temp_directory(char *path)
 {
     (void) remove_temp_directory2(path);
     return 0;
 }
 
-/**
- * Remove the file @path.  This function always returns 0.
- *
- * Note: this is a talloc destructor.
- */
 static int remove_temp_file(char *path)
 {
     int status;
@@ -278,12 +241,6 @@ static int remove_temp_file(char *path)
     return 0;
 }
 
-/**
- * Create a path name with the following format:
- * "/tmp/@prefix-$PID-XXXXXX".  The returned C string is either
- * auto-freed if @context is NULL.  This function returns NULL if an
- * error occurred.
- */
 char *create_temp_name(TALLOC_CTX *context, const char *prefix)
 {
     const char *temp_directory = get_temp_directory();
@@ -303,13 +260,6 @@ char *create_temp_name(TALLOC_CTX *context, const char *prefix)
     return name;
 }
 
-/**
- * Create a directory that will be automatically removed either on
- * PRoot termination if @context is NULL, or once its path name
- * (attached to @context) is freed.  This function returns NULL on
- * error, otherwise the absolute path name to the created directory
- * (@prefix-ed).
- */
 const char *create_temp_directory(TALLOC_CTX *context, const char *prefix)
 {
     char *name;
@@ -332,12 +282,6 @@ const char *create_temp_directory(TALLOC_CTX *context, const char *prefix)
     return name;
 }
 
-/**
- * Create a file that will be automatically removed either on PRoot
- * termination if @context is NULL, or once its path name (attached to
- * @context) is freed.  This function returns NULL on error,
- * otherwise the absolute path name to the created file (@prefix-ed).
- */
 const char *create_temp_file(TALLOC_CTX *context, const char *prefix)
 {
     char *name;
@@ -362,10 +306,6 @@ const char *create_temp_file(TALLOC_CTX *context, const char *prefix)
     return name;
 }
 
-/**
- * Like create_temp_file() but returns an open file stream to the
- * created file.  It's up to the caller to close returned stream.
- */
 FILE *open_temp_file(TALLOC_CTX *context, const char *prefix)
 {
     char *name;

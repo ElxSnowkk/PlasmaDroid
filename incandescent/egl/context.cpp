@@ -8,47 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-// The library initialises itself from a static constructor, and that
-// constructor reaches these tables through inc_display_initialised. A namespace
-// scope map is dynamically initialised, so whether it had been
-// constructed by then came down to the order the linker happened to emit the
-// translation units in -- and it did not: the first insertion ran against an
-// all zero map, whose zero max_load_factor asked for an infinite bucket count
-// and aborted the process before main. Constructing on first use removes the
-// ordering question instead of relying on it.
-// Who is keeping a display initialised, rather than how many times someone said
-// so. See inc_display_initialised in the header for why a count is the wrong shape.
-
-
-// The reference behind g_current_ctx. Same record, kept as a shared_ptr so this
-// thread is a co-owner rather than a bystander watching the map's only reference.
-// It is also what identifies the outgoing record in inc_context_make_current:
-// looking it up by handle stopped being reliable the moment a handle could name a
-// different record than the one this thread has current.
-//
-// Deliberately a plain shared_ptr and not something that releases on thread exit.
-// A thread that dies with a context still current already leaks it -- the count
-// never comes down -- and the map is still holding the record, so nothing is
-// freed behind anyone's back. The one case where this destructor is the last
-// owner is an orphan whose holder exits, which leaks that context's per-subsystem
-// bookkeeping; a destructor that took g_ctx_mutex to do it properly would be
-// running against function-local statics that may already have been destroyed at
-// process exit, which is the worse of the two.
-
-
-// Access sites read the same way they did when these were plain globals.
-
-
-// Caller holds g_ctx_mutex.
-//
-// By value: the caller's shared_ptr is often the one living in the map, and the
-// erase below would destroy it -- and with it the record every line after that
-// reads through.
-
 #include "context.h"
 #include "../gl/log.h"
 #include "../gl/inc.h"

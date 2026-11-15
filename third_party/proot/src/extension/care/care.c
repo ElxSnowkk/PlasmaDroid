@@ -20,20 +20,20 @@
  * 02110-1301 USA.
  */
 
-#include <sys/types.h>		/* struct stat, */
-#include <sys/stat.h>		/* struct stat, */
-#include <unistd.h>		/* lstat(2), */
-#include <linux/limits.h>	/* PATH_MAX, */
-#include <string.h>		/* strlen(3), */
-#include <assert.h>		/* assert(3), */
-#include <time.h>		/* time(2), localtime(3), */
-#include <stddef.h>		/* offsetof(3), */
-#include <talloc.h>		/* talloc*, */
-#include <sys/queue.h>		/* STAILQ_*, */
-#include <inttypes.h>		/* PRI*, */
-#include <linux/auxvec.h>	/* AT_*, */
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <linux/limits.h>
+#include <string.h>
+#include <assert.h>
+#include <time.h>
+#include <stddef.h>
+#include <talloc.h>
+#include <sys/queue.h>
+#include <inttypes.h>
+#include <linux/auxvec.h>
 
-#include "uthash.h"		/* ut*, UT*, HASH*, */
+#include "uthash.h"
 #include "extension/care/care.h"
 #include "extension/care/final.h"
 #include "extension/care/archive.h"
@@ -46,24 +46,16 @@
 #include "path/binding.h"
 #include "cli/note.h"
 
-/* Make uthash use talloc.  */
 #undef  uthash_malloc
 #undef  uthash_free
 #define uthash_malloc(size) talloc_size(care, size)
 #define uthash_free(pointer, size) TALLOC_FREE(pointer)
 
-/* Hash entry.  */
 typedef struct Entry {
     UT_hash_handle hh;
     char *path;
 } Entry;
 
-/**
- * Add a copy of @value at the end if the given @list.  All the newly
- * talloc'ed elements (duplicated value, item, list head) are attached
- * to the given @context.  This function returns NULL if an error
- * occurred, otherwise the newly talloc'ed item.
- */
 Item *queue_item(TALLOC_CTX *context, List **list, const char *value)
 {
     Item *item;
@@ -88,9 +80,6 @@ Item *queue_item(TALLOC_CTX *context, List **list, const char *value)
     return item;
 }
 
-/**
- * Generate a valid archive @care->output from @care.
- */
 static void generate_output_name(const Tracee *tracee, Care *care)
 {
     struct tm *splitted_time;
@@ -125,10 +114,6 @@ static void generate_output_name(const Tracee *tracee, Care *care)
     }
 }
 
-/**
- * Genereate @extension->config from @options.  This function returns
- * -1 if an error ocurred, otherwise 0.
- */
 static int generate_care(Extension *extension, const Options *options)
 {
     size_t suffix_length;
@@ -181,13 +166,11 @@ static int generate_care(Extension *extension, const Options *options)
 	return -1;
     }
 
-    /* Copy & canonicalize volatile paths.  */
     if (options->volatile_paths != NULL) {
 	char path[PATH_MAX];
 	int status;
 
 	STAILQ_FOREACH(item, options->volatile_paths, link) {
-	    /* Initial state before canonicalization.  */
 	    strcpy(path, "/");
 
 	    status =
@@ -196,7 +179,6 @@ static int generate_care(Extension *extension, const Options *options)
 	    if (status < 0)
 		continue;
 
-	    /* Sanity check.  */
 	    if (strcmp(path, "/") == 0) {
 		const char *string;
 		const char *name;
@@ -220,7 +202,6 @@ static int generate_care(Extension *extension, const Options *options)
 	    if (item2 == NULL)
 		continue;
 
-	    /* Preserve the non expanded form.  */
 	    talloc_set_name_const(item2, talloc_get_name(item));
 
 	    VERBOSE(tracee, 1, "volatile path: %s",
@@ -228,7 +209,6 @@ static int generate_care(Extension *extension, const Options *options)
 	}
     }
 
-    /* Copy volatile env. variables.  */
     if (options->volatile_envars != NULL) {
 	STAILQ_FOREACH(item, options->volatile_envars, link) {
 	    item2 = queue_item(care, &care->volatile_envars, item->load);
@@ -240,21 +220,14 @@ static int generate_care(Extension *extension, const Options *options)
 	}
     }
 
-    /* Convert the limit from megabytes to bytes, as expected by
-     * handle_host_path().  */
     care->max_size = options->max_size * 1024 * 1024;
 
-    /* handle_host_path() can now be safely used.  */
     care->is_ready = true;
 
     talloc_set_destructor(care, finalize_care);
     return 0;
 }
 
-/**
- * Add @path_ to the list of @care->concealed_accesses.  This function
- * does *not* check for duplicated entries.
- */
 static void register_concealed_access(const Tracee *tracee, Care *care,
 				      const char *path_)
 {
@@ -267,14 +240,10 @@ static void register_concealed_access(const Tracee *tracee, Care *care,
 	return;
     memcpy(path, path_, length + 1);
 
-    /* It was a concealed access if, and only if, the path was
-     * part of a asymmetric binding.  */
     status = substitute_binding(tracee, HOST, path);
     if (status != 1)
 	return;
 
-    /* Do not register accesses that would not succeed even if the
-     * path was revealed, i.e. the path does not exist at all.  */
     status = access(path, F_OK);
     if (status < 0)
 	return;
@@ -283,9 +252,6 @@ static void register_concealed_access(const Tracee *tracee, Care *care,
     VERBOSE(tracee, 1, "concealed: %s", path);
 }
 
-/**
- * Archive @path if needed.
- */
 static void handle_host_path(Extension *extension, const char *path)
 {
     struct stat statl;
@@ -302,9 +268,6 @@ static void handle_host_path(Extension *extension, const char *path)
     if (!care->is_ready)
 	return;
 
-    /* Don't archive if the path was already seen before.
-     * This ensures the rootfs is re-created as it was
-     * before any file creation or modification. */
     HASH_FIND_STR(care->entries, path, entry);
     if (entry != NULL)
 	return;
@@ -312,8 +275,6 @@ static void handle_host_path(Extension *extension, const char *path)
     switch (get_sysnum(tracee, ORIGINAL)) {
     case PR_getdents:
     case PR_getdents64:
-	/* Don't archive if the dentry was already seen
-	 * before, it would be useless.  */
 	HASH_FIND_STR(care->dentries, path, entry);
 	if (entry != NULL)
 	    return;
@@ -339,7 +300,6 @@ static void handle_host_path(Extension *extension, const char *path)
 	return;
     }
 
-    /* Remember this new entry.  */
     if (as_dentries)
 	HASH_ADD_KEYPTR(hh, care->dentries, entry->path,
 			strlen(entry->path), entry);
@@ -347,16 +307,12 @@ static void handle_host_path(Extension *extension, const char *path)
 	HASH_ADD_KEYPTR(hh, care->entries, entry->path,
 			strlen(entry->path), entry);
 
-    /* Don't use faccessat(2) here since it would require Linux >=
-     * 2.6.16 and Glibc >= 2.4, whereas CARE is supposed to work
-     * on any Linux 2.6 systems.  */
     status = lstat(path, &statl);
     if (status < 0) {
 	register_concealed_access(tracee, care, path);
 	return;
     }
 
-    /* FIFOs and Unix domain sockets should be volatile.  */
     if (S_ISFIFO(statl.st_mode) || S_ISSOCK(statl.st_mode)) {
 	if (care->ipc_are_volatile) {
 	    Item *item = queue_item(care, &care->volatile_paths, path);
@@ -373,8 +329,6 @@ static void handle_host_path(Extension *extension, const char *path)
 		 path);
     }
 
-    /* Don't archive the content of dentries, this save a lot of
-     * space!  */
     if (as_dentries)
 	statl.st_size = 0;
 
@@ -384,14 +338,10 @@ static void handle_host_path(Extension *extension, const char *path)
 	STAILQ_FOREACH(item, care->volatile_paths, link) {
 	    switch (compare_paths(item->load, path)) {
 	    case PATHS_ARE_EQUAL:
-		/* It's a volatile path, archive it as
-		 * empty to preserve its dentry.  */
 		statl.st_size = 0;
 		break;
 
 	    case PATH1_IS_PREFIX:
-		/* Don't archive it's a sub-part of a
-		 * volatile path.  */
 		return;
 
 	    default:
@@ -410,7 +360,6 @@ static void handle_host_path(Extension *extension, const char *path)
 	statl.st_size = 0;
     }
 
-    /* Format the location within the archive.  */
     location = NULL;
     assert(path[0] == '/');
     location =
@@ -448,9 +397,6 @@ typedef struct {
     char name[];
 } NewDirent;
 
-/**
- * Archive all the entries returned by getdents syscalls.
- */
 static void handle_getdents(Tracee *tracee, bool is_new_getdents)
 {
     char component[PATH_MAX];
@@ -520,7 +466,6 @@ static void handle_getdents(Tracee *tracee, bool is_new_getdents)
 	    goto next;
 	}
 
-	/* Archive through the host_path notification. */
 	strcpy(path, "/");
 	translate_path(tracee, path, fd, component, false);
       next:
@@ -531,13 +476,6 @@ static void handle_getdents(Tracee *tracee, bool is_new_getdents)
 	note(tracee, WARNING, INTERNAL, "dentry table out of sync.");
 }
 
-/**
- * Set AT_HWCAP to 0 to ensure no processor specific extensions will
- * be used, for the sake of reproducibility across different CPUs.
- * This function assumes the "argv, envp, auxv" stuff is pointed to by
- * @tracee's stack pointer, as expected right after a successful call
- * to execve(2).
- */
 static int adjust_elf_auxv(Tracee *tracee)
 {
     ElfAuxVector *vectors;
@@ -562,17 +500,12 @@ static int adjust_elf_auxv(Tracee *tracee)
     return 0;
 }
 
-/* List of syscalls handled by this extensions.  */
 static FilteredSysnum filtered_sysnums[] = {
     { PR_getdents, FILTER_SYSEXIT },
     { PR_getdents64, FILTER_SYSEXIT },
     FILTERED_SYSNUM_END,
 };
 
-/**
- * Handler for this @extension.  It is triggered each time an @event
- * occurred.  See ExtensionEvent for the meaning of @data1 and @data2.
- */
 int care_callback(Extension *extension, ExtensionEvent event,
 		  intptr_t data1, intptr_t data2 UNUSED)
 {
@@ -613,8 +546,6 @@ int care_callback(Extension *extension, ExtensionEvent event,
 		word_t result = peek_reg(tracee, CURRENT,
 					 SYSARG_RESULT);
 
-		/* Note: this can be done only before PRoot pushes the
-		 * load script into tracee's stack.  */
 		if ((int) result >= 0)
 		    adjust_elf_auxv(tracee);
 		break;

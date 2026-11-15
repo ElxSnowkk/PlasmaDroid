@@ -1,6 +1,3 @@
-// alpha_modifier.cpp — wp_alpha_modifier_v1 v1 minimal implementation.
-// Allows clients to modify the alpha channel of a surface without modifying
-// its buffer contents. Useful for fade-in/fade-out transitions.
 #include "labwc.h"
 extern "C" {
 #include "alpha-modifier-protocol.h"
@@ -38,7 +35,6 @@ static const struct wp_alpha_modifier_v1_interface am_impl = {
 };
 
 static void am_bind(wl_client* c, void*, uint32_t ver, uint32_t id) {
-    // C20-15: STUB — accepts set_multiplier requests but alpha is not applied in renderer.
     LOGI("wp_alpha_modifier_v1 bound (client %p, ver %u) — stub: alpha not applied", (void*)c, ver);
     wl_resource* r = wl_resource_create(c, &wp_alpha_modifier_v1_interface,
                                          ver < AM_VERSION ? ver : AM_VERSION, id);

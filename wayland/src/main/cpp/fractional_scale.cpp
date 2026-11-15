@@ -1,17 +1,3 @@
-// fractional_scale.cpp — wp_fractional_scale_manager_v1 (C10 conformance).
-//
-// Fixes applied:
-//  C10-13: Duplicate fractional-scale objects per surface now raise
-//    WP_FRACTIONAL_SCALE_MANAGER_V1_ERROR_FRACTIONAL_SCALE_EXISTS.
-//  C10-14: preferred_scale is re-sent whenever the output scale changes via
-//    fractional_scale_update_all().  Previously only sent once at bind time.
-//  C10-15: Scale is cast to double before multiplying by 120 to avoid integer
-//    truncation.  Clamped to >= 1.0 to avoid sending scale 0.
-//  C10-A4: The wp_fractional_scale_v1 resource is stored on the Surface struct
-//    so it can be found for scale-change re-notification.
-//  C10-A3: A surface destruction hook is registered to null the surface*
-//    stored in the resource's user-data when the surface dies before the
-//    fractional-scale object.
 
 #include "labwc.h"
 extern "C" {
@@ -27,7 +13,6 @@ static constexpr uint32_t FS_VERSION = 1;
 static void fs_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 
 static void fs_resource_destroy(wl_resource* r) {
-    // Clean up surface back-pointer when the resource is freed.
     Surface* s = static_cast<Surface*>(wl_resource_get_user_data(r));
     if (s) {
         s->fractional_scale_res = nullptr;
@@ -46,7 +31,6 @@ static void fsmgr_get_fractional_scale(wl_client* c, wl_resource* mgr,
         return;
     }
 
-    // C10-13: prevent duplicate fractional-scale objects per surface.
     if (s->fractional_scale_res) {
         wl_resource_post_error(mgr,
             WP_FRACTIONAL_SCALE_MANAGER_V1_ERROR_FRACTIONAL_SCALE_EXISTS,
@@ -58,20 +42,15 @@ static void fsmgr_get_fractional_scale(wl_client* c, wl_resource* mgr,
                                          FS_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }
 
-    // C10-A4: store resource on surface for later re-notification.
     s->fractional_scale_res = r;
-    // Pass Surface* as user-data so fs_resource_destroy can clear the back-ptr.
     wl_resource_set_implementation(r, &fs_impl, s, fs_resource_destroy);
 
-    // C10-A3: register a surface destruction hook to null the Surface* stored
-    // in this resource's user-data when the wl_surface dies first.
     s->destruction_hooks.push_back([](Surface* dead) {
         if (dead->fractional_scale_res)
             wl_resource_set_user_data(dead->fractional_scale_res, nullptr);
         dead->fractional_scale_res = nullptr;
     });
 
-    // C10-15: use double cast; clamp to >= 1.0.
     State* st = g_state;
     double scale = st ? static_cast<double>(st->output.scale) : 1.0;
     if (scale <= 0.0) scale = 1.0;
@@ -98,9 +77,6 @@ bool fractional_scale_globals_register(State* st) {
     return st->g_fractional_scale != nullptr;
 }
 
-// C10-14: Re-send preferred_scale to all surfaces that have a fractional-scale
-// resource.  Called from compositor_on_window_resized (labwc.cpp) when the
-// output DPI / scale changes.
 void fractional_scale_update_all(State* st) {
     if (!st) return;
     double scale = static_cast<double>(st->output.scale);

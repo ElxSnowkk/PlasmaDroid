@@ -45,4 +45,4 @@ typedef struct {
 
 extern int enable_syscall_filtering(const Tracee * tracee);
 
-#endif				/* SECCOMP_H */
+#endif

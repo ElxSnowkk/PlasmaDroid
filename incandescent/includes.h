@@ -8,34 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-
-
-
-
-
-
-// One hash map for the whole tree. It used to be four -- a hand-written open
-// addressing map, ankerl::unordered_dense, std::unordered_map and khash -- which
-// meant four sets of iterator-invalidation rules to keep straight while reading
-// code that mixes them, and no way to tell whether a container had been chosen
-// or merely inherited from whatever the neighbouring file used.
-//
-// ska::flat_hash_map is open addressing with robin-hood probing, so a rehash
-// moves the elements: iterators, references and pointers into it are invalidated
-// by any insertion. Where a mapped value's address has to outlive later inserts
-// -- the per-context tables handed out as a thread_local pointer, the EGL
-// extension strings whose c_str() the application keeps -- the map holds a
-// unique_ptr and the pointee stays put. Those sites say so where they are
-// declared.
-//
-// Its value_type is pair<Key, T> with the key exposed mutably, so `it->first =`
-// compiles and silently corrupts the table. Nothing here does that, but it is
-// the one sharp edge this map has that a node-based one does not.
-
 #ifndef INCANDESCENT_INCLUDES_H
 #define INCANDESCENT_INCLUDES_H
 

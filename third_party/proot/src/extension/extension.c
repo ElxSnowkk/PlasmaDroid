@@ -20,10 +20,10 @@
  * 02110-1301 USA.
  */
 
-#include <assert.h>		/* assert(3), */
-#include <talloc.h>		/* talloc_*, */
-#include <sys/queue.h>		/* LIST_*, */
-#include <strings.h>		/* bzero(3), */
+#include <assert.h>
+#include <talloc.h>
+#include <sys/queue.h>
+#include <strings.h>
 
 #include "extension/extension.h"
 #include "cli/note.h"
@@ -32,12 +32,6 @@
 #include "compat.h"
 #include "extension/portmap/portmap.h"
 
-/**
- * Remove an @extension from its tracee's list, then send it the
- * "REMOVED" event.
- *
- * Note: this is a Talloc destructor.
- */
 static int remove_extension(Extension *extension)
 {
     LIST_REMOVE(extension, link);
@@ -47,40 +41,28 @@ static int remove_extension(Extension *extension)
     return 0;
 }
 
-/**
- * Allocate a new extension for the given @callback then attach it to
- * its @tracee.  This function returns NULL on error, otherwise the
- * new extension.
- */
 static Extension *new_extension(Tracee *tracee,
 				extension_callback_t callback)
 {
     Extension *extension;
 
-    /* Lazy allocation of the list head. */
     if (tracee->extensions == NULL) {
 	tracee->extensions = talloc_zero(tracee, Extensions);
 	if (tracee->extensions == NULL)
 	    return NULL;
     }
 
-    /* Allocate a new extension. */
     extension = talloc_zero(tracee->extensions, Extension);
     if (extension == NULL)
 	return NULL;
     extension->callback = callback;
 
-    /* Attach it to its tracee. */
     LIST_INSERT_HEAD(tracee->extensions, extension, link);
     talloc_set_destructor(extension, remove_extension);
 
     return extension;
 }
 
-/**
- * Retrieve from @tracee->extensions the extension for the given
- * @callback.
- */
 Extension *get_extension(Tracee *tracee, extension_callback_t callback)
 {
     Extension *extension;
@@ -96,12 +78,6 @@ Extension *get_extension(Tracee *tracee, extension_callback_t callback)
     return NULL;
 }
 
-/**
- * Initialize a new extension for the given @callback then attach it
- * to its @tracee.  The parameter @cli is its argument that was passed
- * to the command-line interface.  This function return -1 if an error
- * occurred, otherwise 0.
- */
 int initialize_extension(Tracee *tracee, extension_callback_t callback,
 			 const char *cli)
 {
@@ -114,7 +90,6 @@ int initialize_extension(Tracee *tracee, extension_callback_t callback,
 	return -1;
     }
 
-    /* Remove the new extension if its initialized has failed.  */
     status =
 	extension->callback(extension, INITIALIZATION, (intptr_t) cli, 0);
     if (status < 0) {
@@ -125,10 +100,6 @@ int initialize_extension(Tracee *tracee, extension_callback_t callback,
     return 0;
 }
 
-/**
- * Rebuild a new list of extensions for this @child from its @parent.
- * The inheritance model is controlled by the @parent.
- */
 void inherit_extensions(Tracee *child, Tracee *parent, word_t clone_flags)
 {
     Extension *parent_extension;
@@ -138,22 +109,17 @@ void inherit_extensions(Tracee *child, Tracee *parent, word_t clone_flags)
     if (parent->extensions == NULL)
 	return;
 
-    /* Sanity check.  */
     assert(child->extensions == NULL || clone_flags == CLONE_RECONF);
 
     LIST_FOREACH(parent_extension, parent->extensions, link) {
-	/* Ask the parent how this extension is
-	 * inheritable.  */
 	status =
 	    parent_extension->callback(parent_extension,
 				       INHERIT_PARENT,
 				       (intptr_t) child, clone_flags);
 
-	/* Not inheritable.  */
 	if (status < 0)
 	    continue;
 
-	/* Inheritable...  */
 	child_extension = new_extension(child, parent_extension->callback);
 	if (child_extension == NULL) {
 	    note(parent, WARNING, INTERNAL,
@@ -162,12 +128,10 @@ void inherit_extensions(Tracee *child, Tracee *parent, word_t clone_flags)
 	}
 
 	if (status == 0) {
-	    /* ... with a shared config or ...  */
 	    child_extension->config =
 		talloc_reference(child_extension,
 				 parent_extension->config);
 	} else {
-	    /* ... with another inheritance model.  */
 	    child_extension->callback(child_extension,
 				      INHERIT_CHILD, (intptr_t)
 				      parent_extension, clone_flags);

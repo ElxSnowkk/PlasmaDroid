@@ -8,24 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Relatório de crash (PlasmaDroid). Sem gdb/ptrace (o PRoot do Android bloqueia), a própria lib diz onde morreu:
-// escreve no stderr (que o plasma-gl guarda em gl-probe.log) e em $INC_DIR_PATH/crash.log o pc de cada frame, a lib e o
-// offset. Só instala handler para sinal que ainda está no padrão (não pisa no handler do app/hybris/Qt).
-// INC_CRASH_REPORT=0 desliga.
-// ---------------------------------------------------------------------------------------------------------------------
-
-
-
-
-// Lê len bytes de addr sem poder falhar: o kernel devolve EFAULT no write() em vez de mandar SIGSEGV.
-
-
-// Imprime a linha do mapa se ela é da própria lib ou contém algum pc do relatório (com o offset dentro do arquivo).
-
 #include "config/settings.h"
 #include "config/stats.h"
 #include "egl/egl.h"

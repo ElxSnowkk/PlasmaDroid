@@ -1,8 +1,3 @@
-// pointer_gestures.cpp — zwp_pointer_gestures_v1 v1 minimal implementation.
-// Provides swipe/pinch/hold touchpad gesture events. For now, we create the
-// gesture objects and provide stub send functions that seat.cpp can call.
-// Android touchpad gestures are forwarded as pointer motion from input-queue.cpp
-// and are not yet wired to the gesture API.
 #include "labwc.h"
 extern "C" {
 #include "pointer-gestures-protocol.h"
@@ -16,7 +11,6 @@ extern "C" {
 extern State* g_state;
 static constexpr uint32_t PG_VERSION = 3;
 
-// Per-pointer gesture resource tracking.
 static std::vector<wl_resource*> g_swipe_resources;
 static std::vector<wl_resource*> g_pinch_resources;
 static std::vector<wl_resource*> g_hold_resources;
@@ -55,7 +49,7 @@ static const struct zwp_pointer_gesture_hold_v1_interface hold_impl = {
 };
 
 static void mgr_get_swipe_gesture(wl_client* c, wl_resource*, uint32_t id,
-                                   wl_resource* /*pointer*/) {
+                                   wl_resource* ) {
     wl_resource* r = wl_resource_create(c, &zwp_pointer_gesture_swipe_v1_interface,
                                          PG_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }
@@ -64,7 +58,7 @@ static void mgr_get_swipe_gesture(wl_client* c, wl_resource*, uint32_t id,
 }
 
 static void mgr_get_pinch_gesture(wl_client* c, wl_resource*, uint32_t id,
-                                   wl_resource* /*pointer*/) {
+                                   wl_resource* ) {
     wl_resource* r = wl_resource_create(c, &zwp_pointer_gesture_pinch_v1_interface,
                                          PG_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }
@@ -75,7 +69,7 @@ static void mgr_get_pinch_gesture(wl_client* c, wl_resource*, uint32_t id,
 static void mgr_release(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 
 static void mgr_get_hold_gesture(wl_client* c, wl_resource*, uint32_t id,
-                                  wl_resource* /*pointer*/) {
+                                  wl_resource* ) {
     wl_resource* r = wl_resource_create(c, &zwp_pointer_gesture_hold_v1_interface,
                                          PG_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }
@@ -89,11 +83,6 @@ static const struct zwp_pointer_gestures_v1_interface mgr_impl = {
     mgr_release,
     mgr_get_hold_gesture,
 };
-
-// ===========================================================================
-// Public send API — callable from seat.cpp to dispatch gesture events.
-// These are stub implementations, not yet wired to Android gesture detection.
-// ===========================================================================
 
 void pointer_gesture_send_swipe_begin(uint32_t serial, uint32_t time,
                                       wl_resource* surface, uint32_t fingers) {
@@ -158,12 +147,7 @@ void pointer_gesture_send_hold_end(uint32_t serial, uint32_t time, int32_t cance
     LOGI("gesture: hold end (cancelled=%d)", cancelled);
 }
 
-// ===========================================================================
-// Global registration
-// ===========================================================================
-
 static void mgr_bind(wl_client* c, void*, uint32_t ver, uint32_t id) {
-    // C20-15: STUB — gesture send-API present but not wired to Android gesture detection.
     LOGI("zwp_pointer_gestures_v1 bound (client %p, ver %u) — stub: gestures not detected", (void*)c, ver);
     wl_resource* r = wl_resource_create(c, &zwp_pointer_gestures_v1_interface,
                                          ver < PG_VERSION ? ver : PG_VERSION, id);

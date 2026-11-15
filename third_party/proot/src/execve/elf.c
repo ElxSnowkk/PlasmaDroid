@@ -20,15 +20,15 @@
  * 02110-1301 USA.
  */
 
-#include <fcntl.h>		/* open(2), */
-#include <unistd.h>		/* read(2), close(2), */
-#include <errno.h>		/* EACCES, ENOTSUP, */
-#include <stdint.h>		/* UINT64_MAX, */
-#include <limits.h>		/* PATH_MAX, */
-#include <string.h>		/* str*(3), memcpy(3), */
-#include <assert.h>		/* assert(3), */
-#include <talloc.h>		/* talloc_*, */
-#include <stdbool.h>		/* bool, true, false,  */
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdint.h>
+#include <limits.h>
+#include <string.h>
+#include <assert.h>
+#include <talloc.h>
+#include <stdbool.h>
 
 #include "execve/elf.h"
 #include "tracee/tracee.h"
@@ -37,25 +37,15 @@
 
 #include "compat.h"
 
-/**
- * Open the ELF file @t_path and extract its header into @elf_header.
- * This function returns -errno if an error occured, otherwise the
- * file descriptor for @t_path.
- */
 int open_elf(const char *t_path, ElfHeader *elf_header)
 {
     int fd;
     int status;
 
-    /*
-     * Read the ELF header.
-     */
-
     fd = open(t_path, O_RDONLY);
     if (fd < 0)
 	return -errno;
 
-    /* Check if it is an ELF file.  */
     status = read(fd, elf_header, sizeof(ElfHeader));
     if (status < 0) {
 	status = -errno;
@@ -70,7 +60,6 @@ int open_elf(const char *t_path, ElfHeader *elf_header)
 	goto end;
     }
 
-    /* Check if it is a known class (32-bit or 64-bit).  */
     if (!IS_CLASS32(*elf_header)
 	&& !IS_CLASS64(*elf_header)) {
 	status = -ENOEXEC;
@@ -79,7 +68,6 @@ int open_elf(const char *t_path, ElfHeader *elf_header)
 
     status = 0;
   end:
-    /* Delayed error handling.  */
     if (status < 0) {
 	close(fd);
 	return status;
@@ -88,12 +76,6 @@ int open_elf(const char *t_path, ElfHeader *elf_header)
     return fd;
 }
 
-/**
- * Invoke @callback(..., @data) for each program headers from the
- * specified ELF file (referenced by @fd, with the given @elf_header).
- * This function returns -errno if an error occured, or it returns
- * immediately the value != 0 returned by @callback, otherwise 0.
- */
 int iterate_program_headers(const Tracee *tracee, int fd,
 			    const ElfHeader *elf_header,
 			    program_headers_iterator_t callback,
@@ -108,15 +90,9 @@ int iterate_program_headers(const Tracee *tracee, int fd,
     int status;
     int i;
 
-    /* Get class-specific fields. */
     elf_phnum = ELF_FIELD(*elf_header, phnum);
     elf_phentsize = ELF_FIELD(*elf_header, phentsize);
     elf_phoff = ELF_FIELD(*elf_header, phoff);
-
-    /*
-     * Some sanity checks regarding the current
-     * support of the ELF specification in PRoot.
-     */
 
     if (elf_phnum >= 0xffff) {
 	note(tracee, WARNING, INTERNAL,
@@ -147,9 +123,6 @@ int iterate_program_headers(const Tracee *tracee, int fd,
     return 0;
 }
 
-/**
- * Check if @host_path is an ELF file for the host architecture.
- */
 bool is_host_elf(const Tracee *tracee, const char *host_path)
 {
     int host_elf_machine[] = HOST_ELF_MACHINE;

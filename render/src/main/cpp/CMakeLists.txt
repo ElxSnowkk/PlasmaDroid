@@ -3,8 +3,6 @@ project(plasmarender LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Vulkan is considered a real render backend only when the Android host has a GLSL->SPIR-V compiler.
-# GLES remains buildable on SDK installations without shader-tools and is used as the safe fallback.
 set(PLASMA_HAS_VULKAN_COMPOSITOR 0)
 set(PLASMA_SHADER_HINTS)
 foreach(root "$ENV{ANDROID_SDK_ROOT}" "$ENV{ANDROID_HOME}" "$ENV{ANDROID_NDK_HOME}" "$ENV{ANDROID_NDK_ROOT}" "${ANDROID_NDK}" "${CMAKE_ANDROID_NDK}")

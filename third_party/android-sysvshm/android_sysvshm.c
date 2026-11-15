@@ -48,8 +48,6 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static void atfork_child(void) { pthread_mutex_init(&lock, NULL); }
 __attribute__((constructor)) static void init_lib(void) { pthread_atfork(NULL, NULL, atfork_child); }
 
-/* ---------- RPC ---------- */
-
 static const char *server_path(void) {
     const char *p = getenv(SYSVSHM_ENV_SERVER);
     return (p && *p) ? p : SYSVSHM_DEFAULT_SOCKET;
@@ -83,7 +81,6 @@ static int write_full(int fd, const void *buf, size_t n) {
     return 0;
 }
 
-/* Envia o pedido e lê a resposta. Se fd_out != NULL, recebe o descritor anexado à resposta. */
 static int rpc(const struct sysvshm_req *q, struct sysvshm_resp *r, int *fd_out) {
     if (fd_out) *fd_out = -1;
     int s = connect_server();
@@ -107,7 +104,6 @@ static int rpc(const struct sysvshm_req *q, struct sysvshm_resp *r, int *fd_out)
             break;
         }
     }
-    /* resposta partida (raro em AF_UNIX/STREAM): completa o restante */
     while ((size_t)got < sizeof(*r)) {
         ssize_t k = read(s, (char *)r + got, sizeof(*r) - (size_t)got);
         if (k < 0 && errno == EINTR) continue;
@@ -122,8 +118,6 @@ static int rpc(const struct sysvshm_req *q, struct sysvshm_resp *r, int *fd_out)
 
 static int fail_status(int status) { errno = -status; return -1; }
 
-/* ---------- tabela de mapeamentos ---------- */
-
 static int map_add(int id, void *addr, size_t size) {
     if (map_count == map_cap) {
         int cap = map_cap ? map_cap * 2 : 16;
@@ -135,8 +129,6 @@ static int map_add(int id, void *addr, size_t size) {
     map_count++;
     return 0;
 }
-
-/* ---------- API SysV ---------- */
 
 EXPORT int shmget(key_t key, size_t size, int flags) {
     struct sysvshm_req q; struct sysvshm_resp r;
@@ -203,7 +195,7 @@ EXPORT int shmdt(const void *shmaddr) {
     struct sysvshm_req q; struct sysvshm_resp r;
     memset(&q, 0, sizeof(q));
     q.op = SYSVSHM_OP_DETACH; q.id = id;
-    rpc(&q, &r, NULL); /* se o broker sumiu, não há o que liberar */
+    rpc(&q, &r, NULL);
     return 0;
 }
 
@@ -237,7 +229,7 @@ EXPORT int shmctl(int shmid, int cmd, struct shmid_ds *buf) {
         buf->shm_perm.mode = 0600;
         return 0;
 
-    case IPC_SET:  /* o broker é do app: dono/modo não mudam */
+    case IPC_SET:
     case SHM_LOCK:
     case SHM_UNLOCK:
         return 0;
@@ -248,7 +240,6 @@ EXPORT int shmctl(int shmid, int cmd, struct shmid_ds *buf) {
     }
 }
 
-/* Nomes usados por libandroid-shmem (bionic); mantidos por compatibilidade com o original. */
 EXPORT int libandroid_shmget(key_t key, size_t size, int flags) { return shmget(key, size, flags); }
 EXPORT void *libandroid_shmat(int shmid, const void *shmaddr, int shmflg) { return shmat(shmid, shmaddr, shmflg); }
 EXPORT int libandroid_shmdt(const void *shmaddr) { return shmdt(shmaddr); }

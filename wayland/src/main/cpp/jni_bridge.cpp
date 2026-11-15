@@ -1,9 +1,3 @@
-// jni_bridge.cpp — JNI glue between CompositorEngine.kt + SurfaceService.kt
-// + TextInputBridge.kt + KeyCaptureAccessibilityService.kt and the native
-// compositor in labwc.cpp.
-//
-// All `Java_…_00024Companion_…` mangled names match the @JvmStatic external
-// declarations on the corresponding Kotlin companion objects.
 
 #include <jni.h>
 #include <android/log.h>
@@ -28,28 +22,23 @@
 static ANativeWindow*               g_window     = nullptr;
 static std::atomic<CompositorHandle*> g_compositor{nullptr};
 
-// Cached references for the IME bridge — set when TextInputBridge.kt
-// registers itself; cleared on detach.
 static JavaVM*            g_jvm           = nullptr;
 static std::mutex         g_ime_mutex;
-static jobject            g_ime_bridge    = nullptr;  // global ref
+static jobject            g_ime_bridge    = nullptr;
 static std::atomic<CompositorHandle*> g_ime_handle{nullptr};
 static jmethodID          g_mid_request_ime = nullptr;
 
-// Cached references for CompositorEngine vsync re-arm callbacks.
-// C11-A4: declared atomic so the store in nativeStart is visible to the
-// Choreographer callback thread without a data race.
 static std::atomic<jobject> g_compositor_plugin{nullptr};
 static jmethodID            g_mid_start_vsync   = nullptr;
 
 extern "C" JNIEXPORT jint JNICALL
-JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
+JNI_OnLoad(JavaVM* vm, void* ) {
     g_jvm = vm;
     return JNI_VERSION_1_6;
 }
 
 extern "C" JNIEXPORT void JNICALL
-JNI_OnUnload(JavaVM* vm, void* /*reserved*/) {
+JNI_OnUnload(JavaVM* vm, void* ) {
     JNIEnv* env = nullptr;
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_OK) {
         jobject plugin = g_compositor_plugin.exchange(nullptr, std::memory_order_acquire);
@@ -72,18 +61,12 @@ JNI_OnUnload(JavaVM* vm, void* /*reserved*/) {
     g_jvm = nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// CompositorEngine
-// ---------------------------------------------------------------------------
-
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_piperella_compositor_CompositorEngine_nativeStart(
         JNIEnv* env, jclass clazz, jobject surface, jstring socketDirJ,
         jstring dataDirJ, jint width, jint height, jint refreshMhz) {
     const char* socketDir = env->GetStringUTFChars(socketDirJ, nullptr);
     const char* dataDir   = env->GetStringUTFChars(dataDirJ,   nullptr);
-    // C11-01: GetStringUTFChars returns null on OOM and may leave a pending
-    // exception.  Clear it before making further JNI calls.
     if (!socketDir || !dataDir) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         if (socketDir) env->ReleaseStringUTFChars(socketDirJ, socketDir);
@@ -95,11 +78,6 @@ Java_com_piperella_compositor_CompositorEngine_nativeStart(
     }
     setenv("XDG_RUNTIME_DIR", socketDir, 1);
     setenv("WAYLAND_DISPLAY", "wayland-0", 1);
-    // xkbcommon looks for X11/xkb keymap files at XKB_CONFIG_ROOT.
-    // The prebuilt libxkbcommon.so has a compiled-in default pointing at
-    // the ARM64 rootfs path which lacks xkb-data.  The FEX x86_64 rootfs
-    // (pre-baked by CI) ships with xkb-data installed, so we redirect
-    // xkbcommon there.
     {
         std::string xkb_dir = std::string(dataDir) + "/fex/rootfs/usr/share/X11/xkb";
         setenv("XKB_CONFIG_ROOT", xkb_dir.c_str(), 1);
@@ -121,8 +99,6 @@ Java_com_piperella_compositor_CompositorEngine_nativeStart(
         return 0;
     }
 
-    // Store a global ref to the CompositorEngine class for vsync re-arm callback.
-    // C11-A4: use atomic exchange to release old ref if re-entering.
     {
         jobject old_plugin = g_compositor_plugin.exchange(nullptr, std::memory_order_acquire);
         if (old_plugin) env->DeleteGlobalRef(old_plugin);
@@ -170,20 +146,12 @@ Java_com_piperella_compositor_CompositorEngine_nativeOnSurfaceDestroyed(
 extern "C" JNIEXPORT void JNICALL
 Java_com_piperella_compositor_CompositorEngine_nativeOnSurfaceCreated(
         JNIEnv* env, jclass, jlong handle, jobject surface) {
-    // C11-A1: Do NOT call ANativeWindow_release(g_window) here.
-    // The compositor holds the only reference (acquired in nativeStart via
-    // ANativeWindow_fromSurface, and transferred via compositor_on_window_recreated).
-    // compositor_on_window_recreated → compositor_on_window_destroyed internally
-    // calls ANativeWindow_release(st->window) before adopting the new window.
-    // Calling release here would decrement the same single reference a second
-    // time, causing a double-release and subsequent use-after-free.
-    g_window = nullptr;  // reset local cache; compositor owns the old reference
+    g_window = nullptr;
 
-    // Acquire a new ANativeWindow from the fresh Java Surface.
     g_window = ANativeWindow_fromSurface(env, surface);
     if (!g_window) {
         LOGE("ANativeWindow_fromSurface returned null — surface may be closed");
-        return;  // Don't proceed with null window
+        return;
     }
     if (auto* h = reinterpret_cast<CompositorHandle*>(handle))
         compositor_on_window_recreated(h, g_window);
@@ -224,19 +192,11 @@ Java_com_piperella_compositor_CompositorEngine_nativeOnRefreshChanged(
 extern "C" JNIEXPORT void JNICALL
 Java_com_piperella_compositor_CompositorEngine_nativeStop(
         JNIEnv*, jclass, jlong handle) {
-    // Clear g_compositor BEFORE compositor_stop to prevent any racing
-    // reads from dispatch threads from using a freed handle.
     g_compositor.store(nullptr, std::memory_order_release);
     if (auto* h = reinterpret_cast<CompositorHandle*>(handle))
         compositor_stop(h);
     g_window = nullptr;
 }
-
-// ---------------------------------------------------------------------------
-// SurfaceProvider — input forwarding (the @JvmStatic external lives there).
-// Touch and key events arrive as packed primitives so we don't have to
-// reflect AInputEvent across the JNI boundary.
-// ---------------------------------------------------------------------------
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_piperella_compositor_SurfaceProvider_nativeDispatchMotion(
@@ -259,9 +219,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_piperella_compositor_SurfaceProvider_nativeDispatchKey(
         JNIEnv*, jclass,
         jlong handle, jint scanCode, jint action, jlong eventTimeNs) {
-    // Legacy overload — meta state unknown, pass 0.
     if (auto* h = reinterpret_cast<CompositorHandle*>(handle))
-        compositor_dispatch_key(h, scanCode, action, eventTimeNs, /*meta_state=*/0);
+        compositor_dispatch_key(h, scanCode, action, eventTimeNs, 0);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -272,20 +231,12 @@ Java_com_piperella_compositor_SurfaceProvider_nativeDispatchScroll(
         compositor_dispatch_scroll(h, dx, dy, eventTimeNs);
 }
 
-// ---------------------------------------------------------------------------
-// SurfaceProvider — gamepad dispatch (from input-queue.cpp JNI or
-// SurfaceService.kt AIDL path).
-// ---------------------------------------------------------------------------
-
 extern "C" JNIEXPORT void JNICALL
 Java_com_piperella_compositor_SurfaceProvider_nativeDispatchGamepad(
-        JNIEnv* env, jclass /*clazz*/,
-        jlong /*handle*/, jint source, jint deviceId,
+        JNIEnv* env, jclass ,
+        jlong , jint source, jint deviceId,
         jint keyCode, jint action,
         jfloatArray axes, jlong eventTimeNs) {
-    // Use the compositor handle cached in this compilation unit rather
-    // than the handle parameter (which originates from input-queue.cpp's
-    // poll_source.nativePtr and lives in a separate .so).
     auto* h = g_compositor.load(std::memory_order_acquire);
     float axis_vals[8] = {};
     if (axes) {
@@ -297,10 +248,6 @@ Java_com_piperella_compositor_SurfaceProvider_nativeDispatchGamepad(
         compositor_dispatch_gamepad(h, source, deviceId, keyCode, action,
                                     axis_vals, eventTimeNs);
 }
-
-// ---------------------------------------------------------------------------
-// Window list query (MW2) — returns JSON array of window info.
-// ---------------------------------------------------------------------------
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_piperella_compositor_CompositorEngine_nativeGetWindowList(
@@ -320,10 +267,6 @@ Java_com_piperella_compositor_CompositorEngine_nativeGetWindowList(
     }
     return nullptr;
 }
-
-// ---------------------------------------------------------------------------
-// TextInputBridge — IME bridge.
-// ---------------------------------------------------------------------------
 
 extern "C" JNIEXPORT void JNICALL
 Java_org_plasma_wayland_NativeWaylandBridge_nativeRegisterImeBridge(
@@ -395,7 +338,6 @@ Java_org_plasma_wayland_NativeWaylandBridge_nativeUnregisterImeBridge(
     g_mid_request_ime = nullptr;
 }
 
-// Called from text_input.cpp when a Wayland client enables/disables the IME.
 extern "C" void droiddeck_jni_request_soft_keyboard(bool show, uint64_t window_id) {
     std::lock_guard<std::mutex> ime_guard(g_ime_mutex);
     if (!g_jvm || !g_ime_bridge || !g_mid_request_ime) return;
@@ -411,10 +353,6 @@ extern "C" void droiddeck_jni_request_soft_keyboard(bool show, uint64_t window_i
     if (attached) g_jvm->DetachCurrentThread();
 }
 
-// ---------------------------------------------------------------------------
-// Vsync re-arm — called from the dispatch thread when damage surfaces commit.
-// Post a Choreographer frame callback on the UI thread via CompositorEngine.
-// ---------------------------------------------------------------------------
 extern "C" void compositor_signal_vsync_needed() {
     jobject plugin = g_compositor_plugin.load(std::memory_order_acquire);
     if (!plugin || !g_mid_start_vsync || !g_jvm) return;
@@ -432,12 +370,6 @@ extern "C" void compositor_signal_vsync_needed() {
     if (attached) g_jvm->DetachCurrentThread();
 }
 
-// ---------------------------------------------------------------------------
-// NotificationListenerService — JNI glue for Android notification capture.
-// ---------------------------------------------------------------------------
-
-// Corresponds to the action constants in NotificationListenerService.kt.
-// NOTE: These MUST match the Kotlin side (NotificationAction.POSTED=0, REMOVED=1).
 enum NotificationAction {
     NOTIFICATION_POSTED = 0,
     NOTIFICATION_REMOVED = 1
@@ -459,8 +391,6 @@ Java_com_piperella_compositor_NotificationListenerService_nativeOnNotification(
     const char* cat = env->GetStringUTFChars(category, nullptr);
     const char* tg  = env->GetStringUTFChars(tag, nullptr);
 
-    // C11-A3: category/tag are nullable; clear any pending exception before
-    // further JNI calls (per JNI: must not call most JNI fns with an exception pending).
     if (env->ExceptionCheck()) env->ExceptionClear();
 
     if (!pkg || !ttl || !txt) {
@@ -490,7 +420,6 @@ Java_com_piperella_compositor_NotificationListenerService_nativeOnNotification(
         entry.tag[sizeof(entry.tag) - 1] = '\0';
         notification_manager_push(st->notification_mgr, &entry);
     } else if (action == NOTIFICATION_REMOVED) {
-        // Remove by Android notification ID + package name.
         uint32_t nid = static_cast<uint32_t>(notificationId);
         notification_manager_remove_by_ext_id(st->notification_mgr, nid, pkg);
         LOGI("Notification removed: %s (id=%u)", pkg, nid);

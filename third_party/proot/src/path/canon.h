@@ -32,4 +32,4 @@ extern int canonicalize(Tracee * tracee, const char *user_path,
 			bool deref_final, char guest_path[PATH_MAX],
 			unsigned int nb_recursion);
 
-#endif				/* CANON_H */
+#endif

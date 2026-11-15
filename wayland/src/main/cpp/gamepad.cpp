@@ -1,21 +1,8 @@
-// gamepad.cpp — zwp_gamepad_manager_v1 (gamepad input protocol)
-//
-// Implements the gamepad protocol: device enumeration, button and axis
-// events delivered per frame.  Input arrives from two paths:
-//
-//   Primary: input-queue.cpp extracts AInputEvent axis/key data and
-//   calls through JNI → SurfaceProvider.nativeDispatchGamepad →
-//   jni_bridge.cpp → compositor_dispatch_gamepad().
-//
-//   Secondary: SurfaceService.kt detects SOURCE_GAMEPAD / SOURCE_JOYSTICK
-//   on the AIDL path and routes to the same JNI entry.
-//
-// Per-device state tracking keeps up to MAX_GAMEPADS (4) devices.
 
 #include "labwc.h"
 #include "protocols/gamepad-protocol.h"
 
-#include <android/input.h>   // C20-06: AINPUT_SOURCE_GAMEPAD, AINPUT_SOURCE_JOYSTICK
+#include <android/input.h>
 #include <android/log.h>
 #include <algorithm>
 #include <array>
@@ -26,41 +13,34 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// ===========================================================================
-// Constants
-// ===========================================================================
-
 static constexpr uint32_t GAMEPAD_VERSION = 1;
 static constexpr int MAX_GAMEPADS     = 4;
-static constexpr int GAMEPAD_BUTTONS  = 17;  // indices 0–16
-static constexpr int GAMEPAD_AXES     = 8;   // LX, LY, RX, RY, LT, RT, HAT_X, HAT_Y
+static constexpr int GAMEPAD_BUTTONS  = 17;
+static constexpr int GAMEPAD_AXES     = 8;
 
-// Android keyCode → button index mapping (standard Xbox layout).
-// Sorted by keyCode for binary search.
 static constexpr int kKeyToButton[][2] = {
-    { 3,   16 },  // AKEYCODE_HOME        → Home
-    { 19,  12 },  // AKEYCODE_DPAD_UP     → DPad Up
-    { 20,  13 },  // AKEYCODE_DPAD_DOWN   → DPad Down
-    { 21,  14 },  // AKEYCODE_DPAD_LEFT   → DPad Left
-    { 22,  15 },  // AKEYCODE_DPAD_RIGHT  → DPad Right
-    { 96,  0  },  // AKEYCODE_BUTTON_A    → A
-    { 97,  1  },  // AKEYCODE_BUTTON_B    → B
-    { 99,  2  },  // AKEYCODE_BUTTON_X    → X
-    { 100, 3  },  // AKEYCODE_BUTTON_Y    → Y
-    { 102, 4  },  // AKEYCODE_BUTTON_L1   → LB
-    { 103, 5  },  // AKEYCODE_BUTTON_R1   → RB
-    { 104, 6  },  // AKEYCODE_BUTTON_L2   → LT (digital)
-    { 105, 7  },  // AKEYCODE_BUTTON_R2   → RT (digital)
-    { 106, 10 },  // AKEYCODE_THUMBL      → LS
-    { 107, 11 },  // AKEYCODE_THUMBR      → RS
-    { 108, 9  },  // AKEYCODE_BUTTON_START → Start
-    { 109, 8  },  // AKEYCODE_BUTTON_SELECT → Back
+    { 3,   16 },
+    { 19,  12 },
+    { 20,  13 },
+    { 21,  14 },
+    { 22,  15 },
+    { 96,  0  },
+    { 97,  1  },
+    { 99,  2  },
+    { 100, 3  },
+    { 102, 4  },
+    { 103, 5  },
+    { 104, 6  },
+    { 105, 7  },
+    { 106, 10 },
+    { 107, 11 },
+    { 108, 9  },
+    { 109, 8  },
 };
 
 static constexpr int kKeyToButtonSize = sizeof(kKeyToButton) / sizeof(kKeyToButton[0]);
 
 static uint32_t android_key_to_button(int32_t key_code) {
-    // Binary search on the first element
     int lo = 0, hi = kKeyToButtonSize - 1;
     while (lo <= hi) {
         int mid = (lo + hi) / 2;
@@ -70,14 +50,10 @@ static uint32_t android_key_to_button(int32_t key_code) {
         if (kKeyToButton[mid][0] < key_code) lo = mid + 1;
         else hi = mid - 1;
     }
-    return 0xFFFFFFFFU;  // not a gamepad button
+    return 0xFFFFFFFFU;
 }
 
-// ===========================================================================
-// Protocol implementation — zwp_gamepad_manager_v1
-// ===========================================================================
-
-static void gamepad_manager_destroy(struct wl_client* /*client*/,
+static void gamepad_manager_destroy(struct wl_client* ,
                                     struct wl_resource* resource) {
     wl_resource_destroy(resource);
 }
@@ -105,7 +81,6 @@ static void gamepad_bind(struct wl_client* client, void* data,
                                    gamepad_manager_resource_destroyed);
     st->gamepad.bound_resources.push_back(r);
 
-    // Send gamepad_added for every already-connected device.
     for (int i = 0; i < MAX_GAMEPADS; ++i) {
         if (st->gamepad.devices[i].connected) {
             auto& d = st->gamepad.devices[i];
@@ -116,10 +91,6 @@ static void gamepad_bind(struct wl_client* client, void* data,
 
     LOGI("zwp_gamepad_manager_v1 bound");
 }
-
-// ===========================================================================
-// Global registration
-// ===========================================================================
 
 bool gamepad_globals_register(State* st) {
     st->g_gamepad_mgr = wl_global_create(
@@ -140,14 +111,6 @@ void gamepad_globals_unregister(State* st) {
     LOGI("gamepad manager unregistered");
 }
 
-// ===========================================================================
-// Input dispatch — compositor_dispatch_gamepad
-//
-// Called from jni_bridge.cpp (via SurfaceProvider.nativeDispatchGamepad).
-// Handles both button events (SOURCE_GAMEPAD) and axis events
-// (SOURCE_JOYSTICK).
-// ===========================================================================
-
 static void dispatch_gamepad_on_thread(State* st,
                                        int32_t source,
                                        int32_t device_id,
@@ -157,7 +120,6 @@ static void dispatch_gamepad_on_thread(State* st,
                                        int64_t event_time_ns) {
     std::lock_guard<std::mutex> g(st->scene_mutex);
 
-    // Compute monotonic ms timestamp (same logic as seat.cpp input_time_ms).
     if (st->input_time_base_ns == 0) {
         st->input_time_base_ns = event_time_ns;
     }
@@ -165,7 +127,6 @@ static void dispatch_gamepad_on_thread(State* st,
     if (delta_ns < 0) delta_ns = 0;
     uint32_t time = static_cast<uint32_t>(delta_ns / 1'000'000);
 
-    // --- Find or allocate a gamepad device slot ------------------------------
     GamepadDevice* dev = nullptr;
     int free_slot = -1;
     for (int i = 0; i < MAX_GAMEPADS; ++i) {
@@ -180,7 +141,6 @@ static void dispatch_gamepad_on_thread(State* st,
     }
 
     if (!dev && free_slot >= 0) {
-        // New device appeared — claim slot and notify clients.
         dev = &st->gamepad.devices[free_slot];
         memset(dev, 0, sizeof(*dev));
         dev->android_device_id = device_id;
@@ -196,18 +156,14 @@ static void dispatch_gamepad_on_thread(State* st,
         LOGI("Gamepad %d connected (device_id=%d)", free_slot, device_id);
     }
 
-    if (!dev) return;  // no free slot
+    if (!dev) return;
 
-    // --- Dispatch -----------------------------------------------------------
-
-    // C20-06: Use AINPUT_SOURCE_GAMEPAD / AINPUT_SOURCE_JOYSTICK from <android/input.h>
-    // instead of magic hex constants (0x00000401 and 0x01000010 respectively).
-    if (source == AINPUT_SOURCE_GAMEPAD) {  // AINPUT_SOURCE_GAMEPAD = 0x00000401
+    if (source == AINPUT_SOURCE_GAMEPAD) {
         uint32_t btn = android_key_to_button(key_code);
         if (btn == 0xFFFFFFFFU) return;
 
-        uint32_t value = (key_action == 0) ? 1 : 0;  // 0=down, 1=up
-        if (dev->last_buttons[btn] == value) return;  // no change
+        uint32_t value = (key_action == 0) ? 1 : 0;
+        if (dev->last_buttons[btn] == value) return;
 
         dev->last_buttons[btn] = value;
 
@@ -217,7 +173,7 @@ static void dispatch_gamepad_on_thread(State* st,
             zwp_gamepad_manager_v1_send_gamepad_frame(r, dev->gamepad_id,
                                                       time);
         }
-    } else if (source == AINPUT_SOURCE_JOYSTICK) {  // AINPUT_SOURCE_JOYSTICK = 0x01000010
+    } else if (source == AINPUT_SOURCE_JOYSTICK) {
         bool changed = false;
         for (int axis = 0; axis < GAMEPAD_AXES; ++axis) {
             float val = axis_values ? axis_values[axis] : 0.0f;
@@ -252,9 +208,6 @@ extern "C" void compositor_dispatch_gamepad(CompositorHandle* h,
                                             int64_t event_time_ns) {
     auto* st = reinterpret_cast<State*>(h);
     if (!st) return;
-    // Marshal onto the dispatch thread — libwayland client out-buffers are
-    // not safe against concurrent wl_display_flush_clients (see seat.cpp).
-    // axis_values points at the caller's stack, so copy it into the lambda.
     std::array<float, GAMEPAD_AXES> axes{};
     if (axis_values)
         std::copy(axis_values, axis_values + GAMEPAD_AXES, axes.begin());

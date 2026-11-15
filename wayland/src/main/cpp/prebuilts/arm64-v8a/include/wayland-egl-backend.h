@@ -34,10 +34,6 @@
 extern "C" {
 #endif
 
-/*
- * NOTE: This version must be kept in sync with the version field in the
- * wayland-egl-backend pkgconfig file generated in meson.build.
- */
 #define WL_EGL_WINDOW_VERSION 3
 
 struct wl_surface;

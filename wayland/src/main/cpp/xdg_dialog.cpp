@@ -1,6 +1,3 @@
-// xdg_dialog.cpp — xdg_wm_dialog_v1 v1 minimal implementation.
-// Allows clients to mark xdg_toplevel surfaces as dialogs (modal, tooltip,
-// etc.) so the compositor can apply appropriate window management.
 #include "labwc.h"
 extern "C" {
 #include "xdg-dialog-protocol.h"
@@ -25,7 +22,7 @@ static const struct xdg_dialog_v1_interface dialog_impl = {
 
 static void wm_dialog_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 static void wm_dialog_get_dialog(wl_client* c, wl_resource*, uint32_t id,
-                                  wl_resource* /*toplevel*/) {
+                                  wl_resource* ) {
     wl_resource* r = wl_resource_create(c, &xdg_dialog_v1_interface,
                                          DIALOG_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }
@@ -37,7 +34,6 @@ static const struct xdg_wm_dialog_v1_interface wm_dialog_impl = {
 };
 
 static void wm_dialog_bind(wl_client* c, void*, uint32_t ver, uint32_t id) {
-    // C20-15: STUB — accepts set_modal/unset_modal but modality is not enforced.
     LOGI("xdg_wm_dialog_v1 bound (client %p, ver %u) — stub: modality not enforced", (void*)c, ver);
     wl_resource* r = wl_resource_create(c, &xdg_wm_dialog_v1_interface,
                                          ver < DIALOG_VERSION ? ver : DIALOG_VERSION, id);

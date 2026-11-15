@@ -9,8 +9,6 @@ struct RenderItem;
 struct Surface;
 struct GpuTracker;
 
-// One Vulkan WSI output for one Android SurfaceView / xdg_toplevel.
-// Each instance owns its swapchain, imported client images and synchronization.
 class VulkanWaylandOutput {
 public:
     VulkanWaylandOutput();
@@ -23,7 +21,6 @@ public:
     void resize(int width, int height);
     void forgetSurface(Surface* surface);
     void teardown();
-    // Must be called before init(); registers this output's GPU timeline.
     void setGpuTracker(GpuTracker* tracker);
     bool active() const;
     const char* deviceName() const;

@@ -1,8 +1,3 @@
-// Auto-generated: resolved US XKB keymap (xkbcomp -xkb, layout "us").
-// Embedded so the compositor needs no xkeyboard-config data files on
-// Android (xkb_context_new with default includes fails there). Loaded via
-// xkb_keymap_new_from_string(XKB_KEYMAP_FORMAT_TEXT_V1). Regenerate with:
-//   xkbcomp -I/usr/share/X11/xkb -xkb names.xkb us.xkb
 #pragma once
 static const char XKB_KEYMAP_US[] = R"PIPERELLA_XKB(
 xkb_keymap {

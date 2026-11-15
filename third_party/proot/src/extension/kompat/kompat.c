@@ -20,19 +20,19 @@
  * 02110-1301 USA.
  */
 
-#include <stdint.h>		/* intptr_t, */
-#include <stdlib.h>		/* strtoul(3), */
-#include <linux/version.h>	/* KERNEL_VERSION, */
-#include <assert.h>		/* assert(3), */
-#include <sys/utsname.h>	/* uname(2), utsname, */
-#include <string.h>		/* str*(3), memcpy(3), */
-#include <talloc.h>		/* talloc_*, */
-#include <fcntl.h>		/* AT_*,  */
-#include <sys/ptrace.h>		/* linux.git:c0a3a20b  */
-#include <errno.h>		/* errno,  */
-#include <linux/auxvec.h>	/* AT_,  */
-#include <linux/futex.h>	/* FUTEX_PRIVATE_FLAG */
-#include <sys/param.h>		/* MIN, */
+#include <stdint.h>
+#include <stdlib.h>
+#include <linux/version.h>
+#include <assert.h>
+#include <sys/utsname.h>
+#include <string.h>
+#include <talloc.h>
+#include <fcntl.h>
+#include <sys/ptrace.h>
+#include <errno.h>
+#include <linux/auxvec.h>
+#include <linux/futex.h>
+#include <sys/param.h>
 
 #include "extension/extension.h"
 #include "syscall/seccomp.h"
@@ -54,9 +54,9 @@ typedef struct {
     int expected_release;
     word_t new_sysarg_num;
     struct {
-	Reg sysarg;		/* first argument to be moved.  */
-	size_t nb_args;		/* number of arguments to be moved.  */
-	int offset;		/* offset to be applied.  */
+	Reg sysarg;
+	size_t nb_args;
+	int offset;
     } shifts[MAX_ARG_SHIFT];
 } Modif;
 
@@ -69,21 +69,12 @@ typedef struct {
     word_t hwcap;
 } Config;
 
-/**
- * Return whether the @expected_release is newer than
- * @config->actual_release and older than @config->virtual_release.
- */
 static bool needs_kompat(const Config *config, int expected_release)
 {
     return (expected_release > config->actual_release
 	    && expected_release <= config->virtual_release);
 }
 
-/**
- * Modify the current syscall of @tracee as described by @modif
- * regarding the given @config.  This function returns whether the
- * syscall was modified or not.
- */
 static bool modify_syscall(Tracee *tracee, const Config *config,
 			   const Modif *modif)
 {
@@ -95,14 +86,12 @@ static bool modify_syscall(Tracee *tracee, const Config *config,
     if (!needs_kompat(config, modif->expected_release))
 	return false;
 
-    /* Check if this syscall is supported on this architecture.  */
     syscall = detranslate_sysnum(get_abi(tracee), modif->new_sysarg_num);
     if (syscall == SYSCALL_AVOIDER)
 	return false;
 
     set_sysnum(tracee, modif->new_sysarg_num);
 
-    /* Shift syscall arguments.  */
     for (i = 0; i < MAX_ARG_SHIFT; i++) {
 	Reg sysarg = modif->shifts[i].sysarg;
 	size_t nb_args = modif->shifts[i].nb_args;
@@ -117,9 +106,6 @@ static bool modify_syscall(Tracee *tracee, const Config *config,
     return true;
 }
 
-/**
- * Return the numeric value for the given kernel @release.
- */
 static int parse_kernel_release(const char *release)
 {
     unsigned long major = 0;
@@ -142,11 +128,6 @@ static int parse_kernel_release(const char *release)
     return KERNEL_VERSION(major, minor, revision);
 }
 
-/**
- * Remove @discarded_flags from the given @tracee's @sysarg register
- * if the actual kernel release is not compatible with the
- * @expected_release.
- */
 static void discard_fd_flags(Tracee *tracee, const Config *config,
 			     int discarded_flags, int expected_release,
 			     Reg sysarg)
@@ -160,16 +141,8 @@ static void discard_fd_flags(Tracee *tracee, const Config *config,
     poke_reg(tracee, sysarg, flags & ~discarded_flags);
 }
 
-/**
- * Replace current @tracee's syscall with an older and compatible one
- * whenever it's required, i.e. when the syscall is supported by the
- * kernel as specified by @config->virtual_release but it isn't
- * supported by the actual kernel.
- */
 static int handle_sysenter_end(Tracee *tracee, Config *config)
 {
-    /* Note: syscalls like "openat" can be replaced by "open" since PRoot
-     * has canonicalized "fd + path" into "path".  */
     switch (get_sysnum(tracee, ORIGINAL)) {
     case PR_accept4:{
 	    Modif modif = {
@@ -188,8 +161,6 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
 		.shifts = NONE
 	    };
 
-	    /* "If oldfd equals newfd, then dup3() fails with the
-	     * error EINVAL" -- man dup3 */
 	    if (peek_reg(tracee, CURRENT, SYSARG_1) ==
 		peek_reg(tracee, CURRENT, SYSARG_2))
 		return -EINVAL;
@@ -206,8 +177,6 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
 		.shifts = NONE
 	    };
 
-	    /* "the size argument is ignored, but must be greater
-	     * than zero" -- man epoll_create */
 	    modified = modify_syscall(tracee, config, &modif);
 	    if (modified)
 		poke_reg(tracee, SYSARG_1, 1);
@@ -235,7 +204,6 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
 
 	    modified = modify_syscall(tracee, config, &modif);
 	    if (modified) {
-		/* EFD_SEMAPHORE can't be emulated with eventfd.  */
 		flags = peek_reg(tracee, CURRENT, SYSARG_2);
 		if ((flags & EFD_SEMAPHORE) != 0)
 		    return -EINVAL;
@@ -335,11 +303,8 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
 #endif
 
 	    if (modify_syscall(tracee, config, &modif)) {
-		// Do this check only if we are patching this syscall.
-		// New flags have been added since 2.6.38
-		// that we should not error on.
 		if ((flags & ~AT_SYMLINK_NOFOLLOW) != 0) {
-		    return -EINVAL;	/* Exposed by LTP.  */
+		    return -EINVAL;
 		}
 	    }
 	    return 0;
@@ -410,7 +375,7 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
 
 	    flags = peek_reg(tracee, CURRENT, SYSARG_5);
 	    if ((flags & ~AT_SYMLINK_FOLLOW) != 0)
-		return -EINVAL;	/* Exposed by LTP.  */
+		return -EINVAL;
 
 	    modify_syscall(tracee, config, &modif);
 	    return 0;
@@ -551,9 +516,6 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
 		.shifts = NONE
 	    };
 
-	    /* "In Linux up to version 2.6.26, the flags argument
-	     * is unused, and must be specified as zero." -- man
-	     * signalfd */
 	    modified = modify_syscall(tracee, config, &modif);
 	    if (modified)
 		poke_reg(tracee, SYSARG_4, 0);
@@ -605,12 +567,6 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
     }
 }
 
-/**
- * Adjust some ELF auxiliary vectors to improve the compatibility.
- * This function assumes the "argv, envp, auxv" stuff is pointed to by
- * @tracee's stack pointer, as expected right after a successful call
- * to execve(2).
- */
 static void adjust_elf_auxv(Tracee *tracee, Config *config)
 {
     ElfAuxVector *vectors;
@@ -632,10 +588,6 @@ static void adjust_elf_auxv(Tracee *tracee, Config *config)
 
     for (vector = vectors; vector->type != AT_NULL; vector++) {
 	switch (vector->type) {
-	    /* Discard AT_SYSINFO* vectors: they can be used to
-	     * get the OS release number from memory instead of
-	     * from the uname syscall, and only this latter is
-	     * currently hooked by PRoot.  */
 	case AT_SYSINFO_EHDR:
 	case AT_SYSINFO:
 	    vector->type = AT_IGNORE;
@@ -648,7 +600,6 @@ static void adjust_elf_auxv(Tracee *tracee, Config *config)
 	    break;
 
 	case AT_RANDOM:
-	    /* Skip only if not in forced mode.  */
 	    if (config->actual_release != 0)
 		goto end;
 	    break;
@@ -658,22 +609,13 @@ static void adjust_elf_auxv(Tracee *tracee, Config *config)
 	}
     }
 
-    /* Add the AT_RANDOM vector only if needed.  */
     if (!needs_kompat(config, KERNEL_VERSION(2, 6, 29)))
 	goto end;
 
     status = add_elf_aux_vector(&vectors, AT_RANDOM, vectors_address);
     if (status < 0)
-	goto end;		/* Not fatal.  */
+	goto end;
 
-    /* Since a new vector needs to be added, the ELF auxiliary
-     * vectors array can't be pushed in place.  As a consequence,
-     * argv[] and envp[] arrays are moved one vector downward to
-     * make room for the new ELF auxiliary vectors array.
-     * Remember, the stack layout is as follow right after execve:
-     *
-     *     argv[], envp[], auxv[]
-     */
     stack_pointer = peek_reg(tracee, CURRENT, STACK_POINTER);
     size = vectors_address - stack_pointer;
     argv_envp = talloc_size(tracee->ctx, size);
@@ -684,19 +626,12 @@ static void adjust_elf_auxv(Tracee *tracee, Config *config)
     if (status < 0)
 	goto end;
 
-    /* Allocate enough room in tracee's stack for the new ELF
-     * auxiliary vector.  */
     reserve_size = 2 * sizeof_word(tracee);
-    /* Make sure the stack is still aligned */
     reserve_size =
 	((reserve_size - 1) / STACK_ALIGNMENT + 1) * STACK_ALIGNMENT;
     stack_pointer -= reserve_size;
     vectors_address -= reserve_size;
 
-    /* Note that it is safe to update the stack pointer manually
-     * since we are in execve sysexit.  However it should be done
-     * before transfering data since the kernel might not allow
-     * page faults below the stack pointer.  */
     poke_reg(tracee, STACK_POINTER, stack_pointer);
 
     status = write_data(tracee, stack_pointer, argv_envp, size);
@@ -708,11 +643,6 @@ static void adjust_elf_auxv(Tracee *tracee, Config *config)
     return;
 }
 
-/**
- * Append to the @tracee's current syscall enough calls to fcntl(@fd)
- * in order to set the flags from the original @sysarg register, if
- * there are also set in @emulated_flags.
- */
 static void emulate_fd_flags(Tracee *tracee, word_t fd, Reg sysarg,
 			     int emulated_flags)
 {
@@ -734,11 +664,6 @@ static void emulate_fd_flags(Tracee *tracee, word_t fd, Reg sysarg,
 			     peek_reg(tracee, CURRENT, SYSARG_RESULT));
 }
 
-/**
- * Adjust the results/output parameters for syscalls that were
- * modified in handle_sysenter_end().  This function returns -errno if
- * an error occured, otherwise 0.
- */
 static int handle_sysexit_end(Tracee *tracee, Config *config)
 {
     word_t result;
@@ -748,7 +673,6 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
     result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
     sysnum = get_sysnum(tracee, ORIGINAL);
 
-    /* Error reported by the kernel.  */
     status = (int) result;
     if (status < 0)
 	return 0;
@@ -759,10 +683,6 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 
 	    address = peek_reg(tracee, ORIGINAL, SYSARG_1);
 
-	    /* The layout of struct utsname does not depend on the
-	     * architecture, it only depends on the kernel
-	     * version.  In this regards, this structure is stable
-	     * since < 2.6.0.  */
 	    status =
 		write_data(tracee, address, &config->utsname,
 			   sizeof(config->utsname));
@@ -785,7 +705,6 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 	    if (length > sizeof(config->utsname.domainname) - 1)
 		return -EINVAL;
 
-	    /* Because of the test above.  */
 	    assert(sizeof(config->utsname.domainname) ==
 		   sizeof(config->utsname.nodename));
 
@@ -794,8 +713,6 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 	    if (status < 0)
 		return status;
 
-	    /* "name does not require a terminating null byte." --
-	     * man 2 set{domain,host}name.  */
 	    name[length] = '\0';
 
 	    return 0;
@@ -923,11 +840,6 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
     return 0;
 }
 
-/**
- * Fill @config->utsname and @config->hwcap according to the content
- * of @string.  This function returns -1 if there is a parsing error,
- * otherwise 0.
- */
 static int parse_utsname(Config *config, const char *string)
 {
     struct utsname utsname;
@@ -941,19 +853,11 @@ static int parse_utsname(Config *config, const char *string)
     else
 	config->actual_release = parse_kernel_release(utsname.release);
 
-    /* Check whether it is the simple format (ie. release number),
-     * or the complex one:
-     *
-     *     '\sysname\nodename\release\version\machine\domainname\hwcap\'
-     *
-     * This complex format is ugly on purpose: it ain't to be used
-     * directly by users.  */
     if (string[0] == '\\') {
 	const char *start;
 	const char *end;
 	char *end2;
 
-	/* Initial state of the parser.  */
 	end = string;
 
 #define PARSE(field) do {						\
@@ -982,7 +886,6 @@ static int parse_utsname(Config *config, const char *string)
 
 #undef PARSE
 
-	/* The hwcap field is parsed as an hexadecimal value.  */
 	errno = 0;
 	config->hwcap = strtol(end + 1, &end2, 16);
 	if (errno != 0 || end2[0] != '\\') {
@@ -1008,7 +911,6 @@ static int parse_utsname(Config *config, const char *string)
     return 0;
 }
 
-/* List of syscalls handled by this extensions.  */
 static FilteredSysnum filtered_sysnums[] = {
     { PR_accept4, FILTER_SYSEXIT },
     { PR_dup3, FILTER_SYSEXIT },
@@ -1047,10 +949,6 @@ static FilteredSysnum filtered_sysnums[] = {
     FILTERED_SYSNUM_END,
 };
 
-/**
- * Handler for this @extension.  It is triggered each time an @event
- * occured.  See ExtensionEvent for the meaning of @data1 and @data2.
- */
 int kompat_callback(Extension *extension, ExtensionEvent event,
 		    intptr_t data1, intptr_t data2 UNUSED)
 {
@@ -1078,8 +976,6 @@ int kompat_callback(Extension *extension, ExtensionEvent event,
 	    Config *config = talloc_get_type_abort(extension->config,
 						   Config);
 
-	    /* Nothing to do if this syscall is being discarded
-	     * (because of an error detected by PRoot).  */
 	    if ((int) data1 < 0)
 		return 0;
 
@@ -1101,8 +997,6 @@ int kompat_callback(Extension *extension, ExtensionEvent event,
 	    word_t result = peek_reg(tracee, CURRENT, SYSARG_RESULT);;
 	    word_t sysnum = get_sysnum(tracee, ORIGINAL);
 
-	    /* Note: this can be done only before PRoot pushes the
-	     * load script into tracee's stack.  */
 	    if ((int) result >= 0 && sysnum == PR_execve)
 		adjust_elf_auxv(tracee, config);
 	    return 0;

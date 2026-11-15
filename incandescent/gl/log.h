@@ -8,20 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-
-
-
-
-// PlasmaDroid: com INC_GL_ERRORS=1 cada entrada GL (todo wrapper que chama LOG()) anota o próprio nome num anel por thread.
-// O relatório de erro (inc_gl_err_report, gles/loader.cpp) imprime as últimas chamadas: o erro do driver só é lido no
-// próximo CHECK_GL_ERROR, que quase nunca é o wrapper que o causou. Desligado custa um bool estático.
-
-// Define a stub for __android_log_print if not on Android
-
 #ifndef INCANDESCENT_LOG_H
 
 #include "../includes.h"

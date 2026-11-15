@@ -1,6 +1,3 @@
-// Native Vulkan renderer for one xdg_toplevel Android SurfaceView.
-// Client images are sampled directly from AHardwareBuffer or a one-plane
-// DRM-modifier DMA-BUF; wl_shm is uploaded through a staging buffer.
 #include "vulkan_wayland_renderer.h"
 #ifndef VK_USE_PLATFORM_ANDROID_KHR
 #define VK_USE_PLATFORM_ANDROID_KHR
@@ -19,7 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>  // PLASMA-WLOPT getenv
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -98,14 +95,10 @@ struct ImageRecord {
     int height = 0;
     bool external = false;
     bool yInvert = false;
-    bool opaqueShm = false;   // wl_shm XRGB/XBGR: alfa do buffer é lixo, tratado no view (swizzle A=ONE)
-    // Dmabuf imports are identified by the dmabuf object (st_dev/st_ino). The
-    // import keeps the memory alive, so the key cannot be reused while cached.
+    bool opaqueShm = false;
     bool keyed = false;
     dev_t keyDev = 0;
     ino_t keyIno = 0;
-    // Staging persistente do caminho wl_shm: criado uma vez, mapeado para sempre e reaproveitado a cada upload.
-    // Antes cada frame criava/alocava/mapeava/destruía um buffer novo e ainda passava por vkQueueWaitIdle.
     VkBuffer stagingBuf = VK_NULL_HANDLE;
     VkDeviceMemory stagingMem = VK_NULL_HANDLE;
     void* stagingPtr = nullptr;
@@ -113,7 +106,7 @@ struct ImageRecord {
     bool stagingCoherent = true;
 };
 
-} // namespace
+}
 
 struct VulkanWaylandOutput::Impl {
     ANativeWindow* window = nullptr;
@@ -134,7 +127,6 @@ struct VulkanWaylandOutput::Impl {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkFormat swapFormat = VK_FORMAT_UNDEFINED;
     VkExtent2D extent{};
-    // Pré-rotação do swapchain: ver pickPreTransform(). swapPre = o que pedimos; swapSeen = currentTransform quando criamos.
     VkSurfaceTransformFlagBitsKHR swapPre = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     VkSurfaceTransformFlagBitsKHR swapSeen = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     std::vector<VkImage> swapImages;
@@ -152,7 +144,6 @@ struct VulkanWaylandOutput::Impl {
     VkSemaphore renderFinished = VK_NULL_HANDLE;
     VkFence inFlight = VK_NULL_HANDLE;
     std::unordered_map<Surface*, ImageRecord> images;
-    // Dmabuf imports parked while a client cycles its swapchain images.
     std::map<std::pair<dev_t, ino_t>, ImageRecord> dmabufCache;
     static constexpr size_t kDmabufCacheMax = 8;
     uint64_t frameNumber = 0;
@@ -162,7 +153,6 @@ struct VulkanWaylandOutput::Impl {
     GpuTimeline timeline;
     bool timelineRegistered = false;
 
-    // Non-blocking GPU progress probe used by drain_buffer_releases().
     static bool probeTimeline(void* ctx) {
         auto* self = static_cast<Impl*>(ctx);
         return self->device && self->inFlight &&
@@ -254,9 +244,6 @@ struct VulkanWaylandOutput::Impl {
         for (VkPhysicalDevice candidate : devices) {
             VkPhysicalDeviceProperties p{};
             vkGetPhysicalDeviceProperties(candidate, &p);
-            // Do not mistake SwiftShader/llvmpipe or another CPU Vulkan ICD
-            // for real GPU acceleration. If no hardware Vulkan device can
-            // present to this Android Surface, the caller chooses GLES instead.
             if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
                 VKW_LOGW("ignoring CPU Vulkan device: %s", p.deviceName);
                 continue;
@@ -454,10 +441,6 @@ struct VulkanWaylandOutput::Impl {
             extent.width = std::clamp<uint32_t>(static_cast<uint32_t>(nativeWidth), caps.minImageExtent.width, caps.maxImageExtent.width);
             extent.height = std::clamp<uint32_t>(static_cast<uint32_t>(nativeHeight), caps.minImageExtent.height, caps.maxImageExtent.height);
         }
-        // O Android entrega currentExtent/currentTransform na orientação NATURAL do painel. Com preTransform =
-        // currentTransform o app precisa pré-rotacionar o que desenha; este renderer não faz isso, então com o aparelho em
-        // paisagem o conteúdo dos clientes saía girado 90 graus e esticado. Pedimos IDENTITY e deixamos o sistema girar
-        // (extent com largura/altura trocadas). PLASMA_VK_PRETRANSFORM=native restaura o comportamento antigo.
         VkSurfaceTransformFlagBitsKHR preTransform = caps.currentTransform;
         {
             const char* pt = getenv("PLASMA_VK_PRETRANSFORM");
@@ -472,7 +455,7 @@ struct VulkanWaylandOutput::Impl {
         swapPre = preTransform;
         swapSeen = caps.currentTransform;
         if (extent.width == 0 || extent.height == 0) return false;
-        uint32_t imageCount = std::max<uint32_t>(caps.minImageCount + 1, 3u);  // PLASMA-WLOPT-MAILBOX
+        uint32_t imageCount = std::max<uint32_t>(caps.minImageCount + 1, 3u);
         if (caps.maxImageCount && imageCount > caps.maxImageCount) imageCount = caps.maxImageCount;
         VkPresentModeKHR plasmaPresent = VK_PRESENT_MODE_FIFO_KHR;
         {
@@ -642,7 +625,6 @@ struct VulkanWaylandOutput::Impl {
             VkPipelineMultisampleStateCreateInfo ms{}; ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO; ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
             VkPipelineColorBlendAttachmentState ba{};
             ba.blendEnable = VK_TRUE;
-            // Wayland client buffers use premultiplied alpha.
             ba.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
             ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
             ba.colorBlendOp = VK_BLEND_OP_ADD;
@@ -701,9 +683,6 @@ struct VulkanWaylandOutput::Impl {
         r = {};
     }
 
-    // Keep a dmabuf import alive instead of destroying it. Parking itself does no
-    // GPU work; anything that destroys an image waits for the device first, since
-    // the last frame may still be sampling it.
     void parkRecord(ImageRecord& r) {
         if (!r.keyed) { vkDeviceWaitIdle(device); destroyImage(r); return; }
         const auto key = std::make_pair(r.keyDev, r.keyIno);
@@ -832,8 +811,6 @@ struct VulkanWaylandOutput::Impl {
         return true;
     }
 
-    // Copia do wl_shm DIRETO para o staging mapeado (uma cópia, só a região danificada) e agenda a transferência
-    // GPU para dentro do command buffer do próprio frame (recordUploads). Sem fila ociosa, sem alocações por frame.
     bool uploadShm(ImageRecord& r, Surface* s) {
         wl_shm_buffer* shm = s && s->current_buffer ? wl_shm_buffer_get(s->current_buffer) : nullptr;
         if (!shm) return false;
@@ -855,16 +832,14 @@ struct VulkanWaylandOutput::Impl {
             default: return false;
         }
         if (width <= 0 || height <= 0 || stride < width * 4 || width > 16384 || height > 16384) return false;
-        // Só recria a imagem se o tamanho/formato mudou. Trocar de wl_buffer (double buffering) NÃO recria nada.
         const bool recreated = !r.image || r.width != width || r.height != height || r.format != vkfmt ||
                                r.opaqueShm != opaque;
         if (recreated) {
             if (r.image) { vkDeviceWaitIdle(device); destroyImage(r); }
-            r.opaqueShm = opaque;   // precisa estar definido antes: o view é criado com o swizzle de alfa
+            r.opaqueShm = opaque;
             if (!createShmImage(r, width, height, vkfmt)) return false;
         }
 
-        // Região: damage em coordenadas de superfície só vale como de buffer com escala 1/sem transformação/sem viewport.
         int ux = 0, uy = 0, uw = width, uh = height;
         if (!recreated && !s->damage_surface.empty() && s->current.buffer_scale <= 1 &&
             s->current.buffer_transform == 0 && s->current.src_w <= 0 && s->current.dst_w <= 0) {
@@ -884,7 +859,6 @@ struct VulkanWaylandOutput::Impl {
         if (!src) { wl_shm_buffer_end_access(shm); return false; }
         auto* dstBase = static_cast<uint8_t*>(r.stagingPtr);
         for (int y = uy; y < uy + uh; ++y) {
-            // Staging com o mesmo leiaute da imagem (linha = width*4): região = offset (uy*width+ux)*4, rowLength = width.
             uint8_t* dst = dstBase + (static_cast<size_t>(y) * width + ux) * 4;
             std::memcpy(dst, src + static_cast<size_t>(y) * stride + static_cast<size_t>(ux) * 4, static_cast<size_t>(uw) * 4);
         }
@@ -905,7 +879,6 @@ struct VulkanWaylandOutput::Impl {
         return true;
     }
 
-    // Grava as cópias staging→imagem no command buffer do frame (dentro da mesma submissão, sem espera extra).
     void recordUploads(VkCommandBuffer cmd) {
         for (const auto& up : pendingUploads) {
             auto it = images.find(up.key);
@@ -917,7 +890,7 @@ struct VulkanWaylandOutput::Impl {
             toDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
             toDst.srcAccessMask = oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ? VK_ACCESS_SHADER_READ_BIT : 0;
             toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            toDst.oldLayout = oldLayout;            // conteúdo anterior preservado: só a região danificada é regravada
+            toDst.oldLayout = oldLayout;
             toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             toDst.srcQueueFamilyIndex = toDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             toDst.image = r.image;
@@ -956,9 +929,6 @@ struct VulkanWaylandOutput::Impl {
         props.sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID;
         props.pNext = &formatProps;
         if (!check(getAhbProperties(device, ahb, &props), "AHB properties")) return false;
-        // RGB(A) AHardwareBuffers map to ordinary VkFormat. Opaque external
-        // formats (normally multi-plane YUV) use sampler-YCbCr conversion and
-        // are intentionally left to the GLES fallback.
         if (formatProps.externalFormat != 0 || formatProps.format == VK_FORMAT_UNDEFINED) return false;
         if (!(formatProps.formatFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) ||
             !supportsAhbImageFormat(formatProps.format)) return false;
@@ -1012,8 +982,6 @@ struct VulkanWaylandOutput::Impl {
         r.bufferGeneration = s->buffer_generation;
         r.yInvert = (s->dmabuf.flags & 1u) != 0;
         if (!createViewAndDescriptor(r)) return false;
-        // importAhb() receives an acquired reference from ahwb_acquire_from_fd().
-        // Transfer ownership only after the Vulkan image/view/descriptor is ready.
         r.ahb = ahb;
         return true;
 #else
@@ -1046,9 +1014,6 @@ struct VulkanWaylandOutput::Impl {
         if (fd < 0) return false;
         VkSubresourceLayout plane{};
         plane.offset = s->dmabuf.offsets[0];
-        // Vulkan requires VkSubresourceLayout::size to be zero when creating
-        // an image with VK_EXT_image_drm_format_modifier. The driver derives
-        // the plane allocation size from the modifier and row pitch.
         plane.size = 0;
         plane.rowPitch = s->dmabuf.strides[0];
         plane.arrayPitch = 0;
@@ -1097,7 +1062,6 @@ struct VulkanWaylandOutput::Impl {
         ai.allocationSize = req.size;
         ai.memoryTypeIndex = type;
         if (!check(vkAllocateMemory(device, &ai, nullptr, &r.memory), "import DMA-BUF memory")) { close(fd); return false; }
-        // A successful vkAllocateMemory consumes the fd.
         if (!check(vkBindImageMemory(device, r.image, r.memory, 0), "bind DMA-BUF image")) return false;
         r.format = format;
         r.width = s->dmabuf.width;
@@ -1127,9 +1091,6 @@ struct VulkanWaylandOutput::Impl {
         const bool newExternalBinding = s->buffer_kind == BufferKind::Dmabuf &&
             r.bufferGeneration != s->buffer_generation;
         if (!sameBuffer || newExternalBinding) {
-            // A client that cycles swapchain images attaches a different wl_buffer
-            // every frame. Reuse the import of the same dmabuf object instead of
-            // destroying and re-importing it (vkDeviceWaitIdle + import per frame).
             bool keyValid = false;
             std::pair<dev_t, ino_t> key{};
             if (s->buffer_kind == BufferKind::Dmabuf && !s->dmabuf.fds.empty()) {
@@ -1159,8 +1120,6 @@ struct VulkanWaylandOutput::Impl {
                     return adopt();
                 }
             }
-            // wl_shm com troca de wl_buffer (double buffering) reaproveita a mesma VkImage; só descarta/estaciona
-            // quando a imagem atual veio de outro tipo de buffer (AHB/dmabuf).
             if (r.image && (s->buffer_kind != BufferKind::Shm || r.external || r.ahb || r.keyed)) parkRecord(r);
             bool imported = false;
             if (s->buffer_kind == BufferKind::Shm) imported = uploadShm(r, s);
@@ -1211,9 +1170,6 @@ struct VulkanWaylandOutput::Impl {
                      VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR)) != 0;
     }
 
-    // VK_SUBOPTIMAL_KHR: com pré-rotação IDENTITY em tela girada o Android devolve SUBOPTIMAL em TODO present
-    // (pedimos um transform diferente do atual de propósito). Recriar o swapchain a cada frame seria um desastre,
-    // então só recria se algo realmente mudou: rotação do aparelho, tamanho, ou SUBOPTIMAL sem mismatch intencional.
     bool swapchainStale() {
         VkSurfaceCapabilitiesKHR c{};
         if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, surface, &c) != VK_SUCCESS) return true;
@@ -1250,7 +1206,7 @@ struct VulkanWaylandOutput::Impl {
         return createSwapchain() && createPipeline();
     }
 
-    bool render(const std::vector<RenderItem>& items, int64_t /*frameTimeNs*/) {
+    bool render(const std::vector<RenderItem>& items, int64_t ) {
         if (!initialized || !device || !swapchain) return false;
         if (resizePending) {
             resizePending = false;
@@ -1259,8 +1215,6 @@ struct VulkanWaylandOutput::Impl {
         std::vector<std::pair<const RenderItem*, ImageRecord*>> drawItems;
         drawItems.reserve(items.size());
         pendingUploads.clear();
-        // Se o frame abortar antes de gravar os uploads, invalida as imagens para serem reenviadas no próximo frame
-        // (senão ficariam marcadas como atualizadas com a textura ainda velha).
         struct UploadGuard {
             Impl* self;
             ~UploadGuard() {
@@ -1273,9 +1227,6 @@ struct VulkanWaylandOutput::Impl {
         } uploadGuard{this};
         ++frameNumber;
         registerTimeline();
-        // Wait for the previous frame before touching any import below: changes
-        // may destroy an image that frame still samples. This also completes its
-        // submit on the GPU timeline, so queued buffer releases can be gated open.
         if (!check(vkWaitForFences(device, 1, &inFlight, VK_TRUE, UINT64_MAX), "wait frame fence")) {
             initialized = false;
             return false;
@@ -1297,9 +1248,6 @@ struct VulkanWaylandOutput::Impl {
                                              imageAvailable, VK_NULL_HANDLE, &imageIndex);
         }
         if (acquire == VK_SUBOPTIMAL_KHR) {
-            // The returned image is valid for this frame. Present it, then
-            // rebuild the swapchain on the next frame instead of abandoning
-            // Vulkan and needlessly switching the SurfaceView to EGL.
             if (swapchainStale()) resizePending = true;
         } else if (acquire != VK_SUCCESS) {
             if (acquire == VK_ERROR_DEVICE_LOST) initialized = false;
@@ -1387,9 +1335,6 @@ struct VulkanWaylandOutput::Impl {
         pi.pSwapchains = &swapchain;
         pi.pImageIndices = &imageIndex;
         VkResult pr = vkQueuePresentKHR(queue, &pi);
-        // No queue idle here. wl_buffer.release is gated on this frame's submit
-        // through the GPU timeline (drain_buffer_releases), so the CPU can record
-        // the next frame while the GPU is still finishing this one.
         if (pr == VK_ERROR_OUT_OF_DATE_KHR) resizePending = true;
         else if (pr == VK_SUBOPTIMAL_KHR && swapchainStale()) resizePending = true;
         if (pr == VK_ERROR_DEVICE_LOST) { initialized = false; return false; }

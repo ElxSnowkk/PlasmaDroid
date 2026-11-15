@@ -1,6 +1,3 @@
-// single_pixel_buffer.cpp — wp_single_pixel_buffer_manager_v1 v1.
-// Allows clients to create a 1×1 wl_buffer with a solid RGBA colour without
-// needing wl_shm. Used for simple coloured rectangles (e.g. cursor fallback).
 #include "labwc.h"
 extern "C" {
 #include "single-pixel-buffer-protocol.h"
@@ -14,8 +11,6 @@ extern "C" {
 extern State* g_state;
 static constexpr uint32_t SPB_VERSION = 1;
 
-// A single-pixel buffer is a 1×1 RGBA wl_buffer. We store the colour values
-// directly in the user data of the wl_buffer resource.
 struct SinglePixelBuf {
     uint32_t r, g, b, a;
 };

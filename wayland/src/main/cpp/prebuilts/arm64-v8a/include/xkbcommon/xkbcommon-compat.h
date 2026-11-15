@@ -26,9 +26,6 @@
 #ifndef _XKBCOMMON_COMPAT_H
 #define _XKBCOMMON_COMPAT_H
 
-/**
- * Renamed keymap API.
- */
 #define xkb_group_index_t xkb_layout_index_t
 #define xkb_group_mask_t xkb_layout_mask_t
 #define xkb_map_compile_flags xkb_keymap_compile_flags
@@ -91,7 +88,6 @@
 
 #define xkb_state_get_map(state) xkb_state_get_keymap(state)
 
-/* Not needed anymore, since there's NO_FLAGS. */
 #define XKB_MAP_COMPILE_PLACEHOLDER XKB_KEYMAP_COMPILE_NO_FLAGS
 #define XKB_MAP_COMPILE_NO_FLAGS XKB_KEYMAP_COMPILE_NO_FLAGS
 

@@ -20,15 +20,15 @@
  * 02110-1301 USA.
  */
 
-#include <string.h>		/* str*(3), */
-#include <assert.h>		/* assert(3), */
-#include <strings.h>		/* bzero(3), */
-#include <sys/queue.h>		/* STAILQ_*, */
-#include <stdint.h>		/* INT_MIN, */
-#include <unistd.h>		/* getpid(2), close(2), */
-#include <stdio.h>		/* printf(3), fflush(3), */
-#include <unistd.h>		/* getcwd(2), */
-#include <errno.h>		/* errno(3), */
+#include <string.h>
+#include <assert.h>
+#include <strings.h>
+#include <sys/queue.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <errno.h>
 
 #include "cli/cli.h"
 #include "cli/note.h"
@@ -39,7 +39,6 @@
 #include "extension/care/extract.h"
 #include "attribute.h"
 
-/* These should be included last.  */
 #include "build.h"
 #include "cli/care.h"
 
@@ -167,11 +166,6 @@ static int handle_option_h(Tracee *tracee UNUSED, const Cli *cli UNUSED,
     return -1;
 }
 
-/**
- * Allocate a new binding for the given @tracee that will conceal the
- * content of @path with an empty file or directory.  This function
- * complains about missing @host path only if @must_exist is true.
- */
 static Binding *new_concealing_binding(Tracee *tracee, const char *path,
 				       bool must_exist)
 {
@@ -203,10 +197,6 @@ static Binding *new_concealing_binding(Tracee *tracee, const char *path,
     return binding;
 }
 
-/**
- * Initialize @tracee's fields that are mandatory for PRoot/CARE but
- * that are not specifiable on the command line.
- */
 static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 				   size_t argc, char *const argv[],
 				   size_t cursor)
@@ -228,22 +218,16 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
     home = getenv("HOME");
     pwd = getenv("PWD");
 
-    /* Set these variables to their default values (ie. when not
-     * set), this simplifies the binding setup to the related
-     * files.  */
     setenv("XAUTHORITY",
 	   talloc_asprintf(tracee->ctx, "%s/.Xauthority", home), 0);
     setenv("ICEAUTHORITY",
 	   talloc_asprintf(tracee->ctx, "%s/.ICEauthority", home), 0);
 
-    /* Enable default option first.  */
     if (!options->ignore_default_config) {
 	const char *expanded;
 	Binding *binding;
 	int status;
 
-	/* Bind an empty file/directory over default concealed
-	 * paths.  */
 	for (i = 0; default_concealed_paths[i] != NULL; i++) {
 	    expanded =
 		expand_front_variable(tracee->ctx,
@@ -256,8 +240,6 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 			expanded ? expanded : "");
 	}
 
-	/* Bind default revealed paths over concealed
-	 * paths.  */
 	for (i = 0; default_revealed_paths[i] != NULL; i++) {
 	    expanded =
 		expand_front_variable(tracee->ctx,
@@ -270,25 +252,20 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 			expanded ? expanded : "");
 	}
 
-	/* Ensure the initial command is accessible.  */
 	status = which(NULL, NULL, path, options->command[0]);
 	if (status < 0)
-	    return -1;		/* This failure was already noticed by which().  */
+	    return -1;
 
 	binding = new_binding(tracee, path, NULL, false);
 	if (binding != NULL)
 	    VERBOSE(tracee, 0, "revealed path: %s", path);
 
-	/* Sanity check.  Note: it is assumed $HOME and $PWD
-	 * are canonicalized.  */
 	if (home != NULL && pwd != NULL && strcmp(home, pwd) == 0)
 	    note(tracee, WARNING, USER,
 		 "$HOME is implicitely revealed since it is the same as $PWD, "
 		 "change your current working directory to be sure "
 		 "your personal data will be not archivable.");
 
-	/* Add the default volatile paths to the list of user
-	 * volatile paths.  */
 	for (i = 0; default_volatile_paths[i] != NULL; i++) {
 	    Item *item;
 
@@ -297,8 +274,6 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 				      default_volatile_paths[i]);
 	    item = queue_item(tracee, &options->volatile_paths, expanded);
 
-	    /* Remember the non expanded form, later used
-	     * by archive_re_execute_sh(). */
 	    if (item != NULL && expanded != default_volatile_paths[i])
 		talloc_set_name_const(item, default_volatile_paths[i]);
 	}
@@ -310,11 +285,10 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 	if (options->max_size == INT_MIN)
 	    options->max_size = CARE_MAX_SIZE;
     } else if (options->max_size == INT_MIN)
-	options->max_size = -1;	/* Unlimited.  */
+	options->max_size = -1;
 
     VERBOSE(tracee, 1, "max size: %d", options->max_size);
 
-    /* Bind an empty file/directory over user concealed paths.  */
     if (options->concealed_paths != NULL) {
 	STAILQ_FOREACH(item, options->concealed_paths, link) {
 	    binding = new_concealing_binding(tracee, item->load, true);
@@ -324,7 +298,6 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 	}
     }
 
-    /* Bind user revealed paths over concealed paths.  */
     if (options->revealed_paths != NULL) {
 	STAILQ_FOREACH(item, options->revealed_paths, link) {
 	    binding = new_binding(tracee, item->load, NULL, true);
@@ -334,7 +307,6 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 	}
     }
 
-    /* Bind volatile paths over concealed paths.  */
     if (options->volatile_paths != NULL) {
 	STAILQ_FOREACH(item, options->volatile_paths, link) {
 	    binding = new_binding(tracee, item->load, NULL, false);
@@ -347,8 +319,6 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
     VERBOSE(tracee, 0,
 	    "----------------------------------------------------------------------");
 
-    /* Initialize @tracee->fs->cwd with a path already canonicalized
-     * as required by care.c:handle_initialization().  */
     if (getcwd(path, PATH_MAX) == NULL) {
 	note(tracee, ERROR, SYSTEM, "can't get current working directory");
 	return -1;
@@ -359,7 +329,6 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 	return -1;
     talloc_set_name_const(tracee->fs->cwd, "$cwd");
 
-    /* Initialize @tracee's root (required by PRoot).  */
     binding = new_binding(tracee, "/", "/", true);
     if (binding == NULL)
 	return -1;
@@ -367,9 +336,6 @@ static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
     return cursor;
 }
 
-/**
- * Initialize CARE extensions.
- */
 static int post_initialize_bindings(Tracee *tracee, const Cli *cli,
 				    size_t argc UNUSED,
 				    char *const argv[]UNUSED,

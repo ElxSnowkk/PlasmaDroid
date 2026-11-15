@@ -50,8 +50,6 @@ android {
 
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 
-
-// Bundle the prebuilts used by the Wayland server into the AAR.
 val copyPrebuiltLibsToAar = tasks.register<Copy>("copyPrebuiltLibsToAar") {
     val prebuiltDir = projectDir.resolve("src/main/cpp/prebuilts/arm64-v8a/lib")
     val jniLibsDir = projectDir.resolve("src/main/jniLibs/arm64-v8a")

@@ -24,8 +24,8 @@
 #define ARCH_H
 
 #ifndef NO_LIBC_HEADER
-#include <sys/ptrace.h>		/* linux.git:c0a3a20b  */
-#include <linux/audit.h>	/* AUDIT_ARCH_*,  */
+#include <sys/ptrace.h>
+#include <linux/audit.h>
 #endif
 
 typedef unsigned long word_t;
@@ -56,7 +56,6 @@ typedef unsigned char byte_t;
 #endif
 #endif
 
-/* Architecture specific definitions. */
 #if defined(ARCH_X86_64)
 
 #define SYSNUMS_HEADER1 "syscall/sysnums-x86_64.h"
@@ -176,4 +175,4 @@ typedef unsigned char byte_t;
 
 #endif
 
-#endif				/* ARCH_H */
+#endif

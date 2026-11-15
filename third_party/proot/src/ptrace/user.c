@@ -32,29 +32,22 @@
 
 #if defined(ARCH_X86_64)
 
-/**
- * Return the index in the "regs" field of a 64-bit "user" area that
- * corresponds to the specified @index in the "regs" field of a 32-bit
- * "user" area.
- */
 static inline size_t convert_user_regs_index(size_t index)
 {
     static size_t mapping[USER32_NB_REGS] = {
-	05, /* ?bx */ 11, /* ?cx */ 12,	/* ?dx */
-	13, /* ?si */ 14, /* ?di */ 04,	/* ?bp */
-	10, /* ?ax */ 23, /* ds */ 24,	/* es */
-	25, /* fs */ 26, /* gs */ 15,	/* orig_?ax */
-	16, /* ?ip */ 17, /* cs */ 18,	/* eflags */
-	19, /* ?sp */ 20,	/* ss */
+	05,  11,  12,
+	13,  14,  04,
+	10,  23,  24,
+	25,  26,  15,
+	16,  17,  18,
+	19,  20,
     };
 
-    /* Sanity check.  */
     assert(index < USER32_NB_REGS);
 
     return mapping[index];
 }
 
-/* Layout of a 32-bit "user" area.  */
 #define USER32_REGS_OFFSET	0
 #define USER32_REGS_SIZE	(USER32_NB_REGS * sizeof(uint32_t))
 #define USER32_FPVALID_OFFSET	(USER32_REGS_OFFSET	+ USER32_REGS_SIZE)
@@ -75,16 +68,10 @@ static inline size_t convert_user_regs_index(size_t index)
 #define USER32_DEBUGREG_OFFSET	(USER32_COMM_OFFSET	+ USER32_COMM_SIZE)
 #define USER32_DEBUGREG_SIZE	(8 * sizeof(uint32_t))
 
-/**
- * Return the offset in the "debugreg" field of a 64-bit "user" area
- * that corresponds to the specified @offset in the "debugreg" field
- * of a 32-bit "user" area.
- */
 static inline size_t convert_user_debugreg_offset(size_t offset)
 {
     size_t index;
 
-    /* Sanity check.  */
     assert(offset >= USER32_DEBUGREG_OFFSET
 	   && offset < USER32_DEBUGREG_OFFSET + USER32_DEBUGREG_SIZE);
 
@@ -92,51 +79,45 @@ static inline size_t convert_user_debugreg_offset(size_t offset)
     return offsetof(struct user, u_debugreg) + index * sizeof(uint64_t);
 }
 
-/**
- * Return the offset in a 64-bit "user" area that corresponds to the
- * specified @offset in a 32-bit "user" area.  This function returns
- * "(word_t) -1" if the specified @offset is invalid.
- */
 word_t convert_user_offset(word_t offset)
 {
     const char *area_name = NULL;
 
-    if ( /* offset >= 0 && */ offset <
+    if (  offset <
 	USER32_REGS_OFFSET + USER32_REGS_SIZE) {
-	/* Sanity checks.  */
 	if ((offset % sizeof(uint32_t)) != 0)
 	    return (word_t) - 1;
 
 	return convert_user_regs_index(offset / sizeof(uint32_t)) *
 	    sizeof(uint64_t);
     } else if (offset == USER32_FPVALID_OFFSET)
-	area_name = "fpvalid";	/* Not yet supported.  */
+	area_name = "fpvalid";
     else if (offset >= USER32_I387_OFFSET
 	     && offset < USER32_I387_OFFSET + USER32_I387_SIZE)
-	area_name = "i387";	/* Not yet supported.  */
+	area_name = "i387";
     else if (offset == USER32_TSIZE_OFFSET)
-	area_name = "tsize";	/* Not yet supported.  */
+	area_name = "tsize";
     else if (offset == USER32_DSIZE_OFFSET)
-	area_name = "dsize";	/* Not yet supported.  */
+	area_name = "dsize";
     else if (offset == USER32_SSIZE_OFFSET)
-	area_name = "ssize";	/* Not yet supported.  */
+	area_name = "ssize";
     else if (offset == USER32_START_CODE_OFFSET)
-	area_name = "start_code";	/* Not yet supported.  */
+	area_name = "start_code";
     else if (offset == USER32_START_STACK_OFFSET)
-	area_name = "start_stack";	/* Not yet supported.  */
+	area_name = "start_stack";
     else if (offset == USER32_SIGNAL_OFFSET)
-	area_name = "signal";	/* Not yet supported.  */
+	area_name = "signal";
     else if (offset == USER32_RESERVED_OFFSET)
-	area_name = "reserved";	/* Not yet supported.  */
+	area_name = "reserved";
     else if (offset == USER32_AR0_OFFSET)
-	area_name = "ar0";	/* Not yet supported.  */
+	area_name = "ar0";
     else if (offset == USER32_FPSTATE_OFFSET)
-	area_name = "fpstate";	/* Not yet supported.  */
+	area_name = "fpstate";
     else if (offset == USER32_MAGIC_OFFSET)
-	area_name = "magic";	/* Not yet supported.  */
+	area_name = "magic";
     else if (offset >= USER32_COMM_OFFSET
 	     && offset < USER32_COMM_OFFSET + USER32_COMM_SIZE)
-	area_name = "comm";	/* Not yet supported.  */
+	area_name = "comm";
     else if (offset >= USER32_DEBUGREG_OFFSET
 	     && offset < USER32_DEBUGREG_OFFSET + USER32_DEBUGREG_SIZE)
 	return convert_user_debugreg_offset(offset);
@@ -145,14 +126,9 @@ word_t convert_user_offset(word_t offset)
 
     note(NULL, WARNING, INTERNAL,
 	 "ptrace user area '%s' not supported yet", area_name);
-    return (word_t) - 1;	/* Unknown offset.  */
+    return (word_t) - 1;
 }
 
-/**
- * Convert the "regs" field from a 64-bit "user" area into a "regs"
- * field from a 32-bit "user" area, or vice versa according to
- * @reverse.
- */
 void convert_user_regs_struct(bool reverse, uint64_t *user_regs64,
 			      uint32_t user_regs32[USER32_NB_REGS])
 {
@@ -169,4 +145,4 @@ void convert_user_regs_struct(bool reverse, uint64_t *user_regs64,
     }
 }
 
-#endif				/* ARCH_X86_64 */
+#endif

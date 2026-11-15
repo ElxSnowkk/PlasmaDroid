@@ -20,14 +20,14 @@
  * 02110-1301 USA.
  */
 
-#include <sys/ptrace.h>		/* PTRACE_*,  */
-#include <errno.h>		/* E*, */
-#include <assert.h>		/* assert(3), */
-#include <stdbool.h>		/* bool, true, false, */
-#include <signal.h>		/* siginfo_t, */
-#include <sys/uio.h>		/* struct iovec, */
-#include <sys/param.h>		/* MIN(), MAX(), */
-#include <string.h>		/* memcpy(3), */
+#include <sys/ptrace.h>
+#include <errno.h>
+#include <assert.h>
+#include <stdbool.h>
+#include <signal.h>
+#include <sys/uio.h>
+#include <sys/param.h>
+#include <string.h>
 
 #include "ptrace/ptrace.h"
 #include "ptrace/user.h"
@@ -43,11 +43,11 @@
 #include "compat.h"
 
 #if defined(ARCH_X86_64) || defined(ARCH_X86)
-#include <asm/ldt.h>		/* struct user_desc, */
+#include <asm/ldt.h>
 #endif
 
 #if defined(ARCH_X86_64)
-#include <asm/prctl.h>		/* ARCH_{G,S}ET_{F,G}S, */
+#include <asm/prctl.h>
 #endif
 
 #if defined(ARCH_ARM_EABI)
@@ -91,23 +91,12 @@ static const char *stringify_ptrace(PTRACE_REQUEST_TYPE request)
     }
 }
 
-/**
- * Translate the ptrace syscall made by @tracee into a "void" syscall
- * in order to emulate the ptrace mechanism within PRoot.  This
- * function returns -errno if an error occured (unsupported request),
- * otherwise 0.
- */
 int translate_ptrace_enter(Tracee *tracee)
 {
-    /* The ptrace syscall have to be emulated since it can't be nested.  */
     set_sysnum(tracee, PR_void);
     return 0;
 }
 
-/**
- * Set @ptracee's tracer to @ptracer, and increment ptracees counter
- * of this later.
- */
 void attach_to_ptracer(Tracee *ptracee, Tracee *ptracer)
 {
     bzero(&(PTRACEE), sizeof(PTRACEE));
@@ -116,10 +105,6 @@ void attach_to_ptracer(Tracee *ptracee, Tracee *ptracer)
     PTRACER.nb_ptracees++;
 }
 
-/**
- * Unset @ptracee's tracer, and decrement ptracees counter of this
- * later.
- */
 void detach_from_ptracer(Tracee *ptracee)
 {
     Tracee *ptracer = PTRACEE.ptracer;
@@ -130,10 +115,6 @@ void detach_from_ptracer(Tracee *ptracee)
     PTRACER.nb_ptracees--;
 }
 
-/**
- * Emulate the ptrace syscall made by @tracee.  This function returns
- * -errno if an error occured (unsupported request), otherwise 0.
- */
 int translate_ptrace_exit(Tracee *tracee)
 {
     word_t request, pid, address, data, result;
@@ -142,31 +123,23 @@ int translate_ptrace_exit(Tracee *tracee)
     int signal;
     int status;
 
-    /* Read ptrace parameters.  */
     request = peek_reg(tracee, ORIGINAL, SYSARG_1);
     pid = peek_reg(tracee, ORIGINAL, SYSARG_2);
     address = peek_reg(tracee, ORIGINAL, SYSARG_3);
     data = peek_reg(tracee, ORIGINAL, SYSARG_4);
 
-    /* Propagate signedness for this special value.  */
     if (is_32on64_mode(tracee) && pid == 0xFFFFFFFF)
 	pid = (word_t) - 1;
 
-    /* The TRACEME request is the only one used by a tracee.  */
     if (request == PTRACE_TRACEME) {
 	ptracer = tracee->parent;
 	ptracee = tracee;
 
-	/* The emulated ptrace in PRoot has the same
-	 * limitation as the real ptrace in the Linux kernel:
-	 * only one tracer per process.  */
 	if (PTRACEE.ptracer != NULL || ptracee == ptracer)
 	    return -EPERM;
 
 	attach_to_ptracer(ptracee, ptracer);
 
-	/* Detect when the ptracer has gone to wait before the
-	 * ptracee did the ptrace(ATTACHME) request.  */
 	if (PTRACER.waits_in == WAITS_IN_KERNEL) {
 	    status = kill(ptracer->pid, SIGSTOP);
 	    if (status < 0)
@@ -178,50 +151,33 @@ int translate_ptrace_exit(Tracee *tracee)
 	    }
 	}
 
-	/* Disable seccomp acceleration for this tracee and
-	 * all its children since we can't assume what are the
-	 * syscalls its tracer is interested with.  */
 	if (tracee->seccomp == ENABLED)
 	    tracee->seccomp = DISABLING;
 
 	return 0;
     }
 
-    /* The ATTACH, SEIZE, and INTERRUPT requests are the only ones
-     * where the ptracee is in an unknown state.  */
     if (request == PTRACE_ATTACH) {
 	ptracer = tracee;
 	ptracee = get_tracee(ptracer, pid, false);
 	if (ptracee == NULL)
 	    return -ESRCH;
 
-	/* The emulated ptrace in PRoot has the same
-	 * limitation as the real ptrace in the Linux kernel:
-	 * only one tracer per process.  */
 	if (PTRACEE.ptracer != NULL || ptracee == ptracer)
 	    return -EPERM;
 
 	attach_to_ptracer(ptracee, ptracer);
 
-	/* The tracee is sent a SIGSTOP, but will not
-	 * necessarily have stopped by the completion of this
-	 * call.
-	 *
-	 * -- man 2 ptrace.  */
 	kill(pid, SIGSTOP);
 
 	return 0;
     }
 
-    /* Here, the tracee is a ptracer.  Also, the requested ptracee
-     * has to be in the "stopped for ptracer" state.  */
     ptracer = tracee;
     ptracee = get_stopped_ptracee(ptracer, pid, false, __WALL);
     if (ptracee == NULL) {
 	static bool warned = false;
 
-	/* Ensure we didn't get there only because inheritance
-	 * mechanism has missed this one.  */
 	ptracee = get_tracee(tracee, pid, false);
 	if (ptracee != NULL && ptracee->exe == NULL && !warned) {
 	    warned = true;
@@ -232,7 +188,6 @@ int translate_ptrace_exit(Tracee *tracee)
 	return -ESRCH;
     }
 
-    /* Sanity checks.  */
     if (PTRACEE.is_zombie
 	|| PTRACEE.ptracer != ptracer || pid == (word_t) - 1)
 	return -ESRCH;
@@ -242,45 +197,44 @@ int translate_ptrace_exit(Tracee *tracee)
 	PTRACEE.ignore_syscalls = false;
 	forced_signal = (int) data;
 	status = 0;
-	break;			/* Restart the ptracee.  */
+	break;
 
     case PTRACE_CONT:
 	PTRACEE.ignore_syscalls = true;
 	forced_signal = (int) data;
 	status = 0;
-	break;			/* Restart the ptracee.  */
+	break;
 
     case PTRACE_SINGLESTEP:
 	ptracee->restart_how = PTRACE_SINGLESTEP;
 	forced_signal = (int) data;
 	status = 0;
-	break;			/* Restart the ptracee.  */
+	break;
 
     case PTRACE_SINGLEBLOCK:
 	ptracee->restart_how = PTRACE_SINGLEBLOCK;
 	forced_signal = (int) data;
 	status = 0;
-	break;			/* Restart the ptracee.  */
+	break;
 
     case PTRACE_DETACH:
 	detach_from_ptracer(ptracee);
 	status = 0;
-	break;			/* Restart the ptracee.  */
+	break;
 
     case PTRACE_KILL:
 	status = ptrace(request, pid, NULL, NULL);
-	break;			/* Restart the ptracee.  */
+	break;
 
     case PTRACE_SETOPTIONS:
 	if (data & PTRACE_O_TRACESECCOMP) {
-	    /* We don't really support forwarding seccomp traps */
 	    note(ptracer, WARNING, INTERNAL,
 		 "ptrace option PTRACE_O_TRACESECCOMP "
 		 "not supported yet");
 	    return -EINVAL;
 	}
 	PTRACEE.options = data;
-	return 0;		/* Don't restart the ptracee.  */
+	return 0;
 
     case PTRACE_GETEVENTMSG:{
 	    status = ptrace(request, pid, NULL, &result);
@@ -291,7 +245,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (errno != 0)
 		return -errno;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_PEEKUSER:
@@ -312,7 +266,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	if (errno != 0)
 	    return -errno;
 
-	return 0;		/* Don't restart the ptracee.  */
+	return 0;
 
     case PTRACE_POKEUSER:
 	if (is_32on64_mode(ptracer)) {
@@ -325,7 +279,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	if (status < 0)
 	    return -errno;
 
-	return 0;		/* Don't restart the ptracee.  */
+	return 0;
 
     case PTRACE_POKETEXT:
     case PTRACE_POKEDATA:
@@ -346,7 +300,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	if (status < 0)
 	    return -errno;
 
-	return 0;		/* Don't restart the ptracee.  */
+	return 0;
 
     case PTRACE_GETSIGINFO:{
 	    siginfo_t siginfo;
@@ -359,7 +313,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return status;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_SETSIGINFO:{
@@ -373,7 +327,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return -errno;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_GETREGS:{
@@ -404,7 +358,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return status;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_SETREGS:{
@@ -435,7 +389,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return -errno;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_GETFPREGS:{
@@ -450,7 +404,7 @@ int translate_ptrace_exit(Tracee *tracee)
 		return -errno;
 
 	    if (is_32on64_mode(tracee)) {
-#if 0				/* TODO */
+#if 0
 		struct user_fpregs_struct fpregs64;
 
 		memcpy(&fpregs64, &buffer.fpregs,
@@ -475,7 +429,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return status;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_SETFPREGS:{
@@ -494,7 +448,7 @@ int translate_ptrace_exit(Tracee *tracee)
 		return status;
 
 	    if (is_32on64_mode(ptracer)) {
-#if 0				/* TODO */
+#if 0
 		uint32_t fpregs32[USER32_NB_FPREGS];
 
 		memcpy(fpregs32, buffer.fpregs32, sizeof(fpregs32));
@@ -516,7 +470,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return -errno;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
 #if defined(ARCH_X86_64) || defined(ARCH_X86)
@@ -532,7 +486,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return status;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_SET_THREAD_AREA:{
@@ -547,7 +501,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return -errno;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 #endif
 
@@ -565,7 +519,6 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (errno != 0)
 		return -errno;
 
-	    /* Sanity check.  */
 	    assert(sizeof(local_iovec.iov_len) == sizeof(word_t));
 
 	    local_iovec.iov_len = remote_iovec_len;
@@ -581,19 +534,17 @@ int translate_ptrace_exit(Tracee *tracee)
 	    local_iovec.iov_len = MIN(remote_iovec_len, local_iovec.iov_len);
 	    remote_iovec_len = local_iovec.iov_len;
 
-	    /* Update remote vector content.  */
 	    status =
 		writev_data(ptracer, remote_iovec_base, &local_iovec, 1);
 	    if (status < 0)
 		return status;
 
-	    /* Update remote vector length.  */
 	    poke_word(ptracer, data + sizeof_word(ptracer),
 		      remote_iovec_len);
 	    if (errno != 0)
 		return -errno;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_SETREGSET:{
@@ -610,7 +561,6 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (errno != 0)
 		return -errno;
 
-	    /* Sanity check.  */
 	    assert(sizeof(local_iovec.iov_len) == sizeof(word_t));
 
 	    local_iovec.iov_len = remote_iovec_len;
@@ -619,7 +569,6 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (local_iovec.iov_base == NULL)
 		return -ENOMEM;
 
-	    /* Copy remote content into the local vector.  */
 	    status = read_data(ptracer, local_iovec.iov_base,
 			       remote_iovec_base, local_iovec.iov_len);
 	    if (status < 0)
@@ -629,7 +578,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    if (status < 0)
 		return status;
 
-	    return 0;		/* Don't restart the ptracee.  */
+	    return 0;
 	}
 
     case PTRACE_GETVFPREGS:
@@ -671,7 +620,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	    return -ENOTSUP;
 	}
 
-	return 0;		/* Don't restart the ptracee.  */
+	return 0;
 #endif
 
     case PTRACE_SET_SYSCALL:
@@ -679,7 +628,7 @@ int translate_ptrace_exit(Tracee *tracee)
 	if (status < 0)
 	    return -errno;
 
-	return 0;		/* Don't restart the ptracee.  */
+	return 0;
 
     default:
 	note(ptracer, WARNING, INTERNAL,
@@ -688,13 +637,10 @@ int translate_ptrace_exit(Tracee *tracee)
 	return -ENOTSUP;
     }
 
-    /* Now, the initial tracee's event can be handled.  */
     signal = PTRACEE.event4.proot.pending
 	? handle_tracee_event(ptracee, PTRACEE.event4.proot.value)
 	: PTRACEE.event4.proot.value;
 
-    /* The restarting signal from the ptracer overrides the
-     * restarting signal from PRoot.  */
     if (forced_signal != -1)
 	signal = forced_signal;
 

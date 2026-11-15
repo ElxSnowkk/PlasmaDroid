@@ -1,5 +1,3 @@
-// scene.cpp — z-ordered traversal of toplevels + popups, damage union,
-// hand-off to the renderer. Subsurfaces ride along with their parent.
 
 #include "labwc.h"
 #include "egl_renderer.h"
@@ -16,16 +14,11 @@
 #define LOG_TAG "Piperella/scene"
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 
-// Fix 9: propagate cumulative origin offset so child subsurface damage rects
-// are translated into parent (and ultimately output) coordinate space.
 void scene_accumulate_damage(State* st, Surface* s, std::vector<Rect>& out,
                              int origin_x, int origin_y) {
     if (!s) return;
-    // C05-12: include this surface's committed wl_surface.offset so that damage
-    // rects match where the buffer actually renders (offset shifts the attach point).
     int ox = origin_x + s->current.offset_x;
     int oy = origin_y + s->current.offset_y;
-    // Fix 8: damage_surface is the live list (DamageBag removed).
     for (const auto& r : s->damage_surface) {
         out.push_back({r.x + ox, r.y + oy, r.w, r.h});
     }
@@ -37,11 +30,6 @@ void scene_accumulate_damage(State* st, Surface* s, std::vector<Rect>& out,
     }
 }
 
-// C05-01: recursively collect a surface and its subsurfaces (children) into
-// RenderItems in painter's order (parent first, then children in stored z-order;
-// the default per spec is children above parent).
-// abs_x/abs_y are the compositor-space position of this surface's origin,
-// already including any wl_surface.offset from the call site.
 static void collect_surface_items(Surface* s, int abs_x, int abs_y,
                                   std::vector<RenderItem>& items) {
     if (!s) return;
@@ -52,7 +40,6 @@ static void collect_surface_items(Surface* s, int abs_x, int abs_y,
     it.y = abs_y;
     int tbw = s->buffer_w, tbh = s->buffer_h;
     buffer_transform_dimensions(tbw, tbh, s->current.buffer_transform);
-    // C05-02: buffer_scale — surface logical size = buffer size / scale.
     int scale = std::max(1, s->current.buffer_scale);
     int rw = (s->current.dst_w > 0) ? s->current.dst_w : tbw / scale;
     int rh = (s->current.dst_h > 0) ? s->current.dst_h : tbh / scale;
@@ -60,10 +47,8 @@ static void collect_surface_items(Surface* s, int abs_x, int abs_y,
     it.h = (rh > 0) ? rh : 0;
     if (it.w > 0 && it.h > 0) items.push_back(it);
     }
-    // Recurse into children (C05-01: subsurfaces must be rendered).
     for (Surface* child : s->children) {
         if (!child) continue;
-        // Child abs position = parent abs + sub_x/y + child's own offset (C05-03).
         collect_surface_items(child,
             abs_x + child->sub_x + child->current.offset_x,
             abs_y + child->sub_y + child->current.offset_y,
@@ -82,15 +67,10 @@ static bool surface_is_descendant(Surface* root, Surface* candidate) {
 void scene_render(State* st, int64_t frame_time_ns) {
     if (ATrace_isEnabled()) ATrace_beginSection("scene_render");
     if (!st->renderer) { if (ATrace_isEnabled()) ATrace_endSection(); return; }
-    // C20-09: No per-frame title logging here — title is only logged on set_title
-    // and on toplevel destroy (event-driven, not per-vsync). Keep it that way.
 
-    // Collect renderable surfaces in z-order (MW2): sort toplevels by z_order,
-    // popups always render on top of every toplevel.
     std::vector<RenderItem> items;
     items.reserve(st->toplevels.size() + st->popups.size());
 
-    // Sort toplevels by z_order for correct stacking.
     std::vector<Toplevel*> sorted_tls;
     sorted_tls.reserve(st->toplevels.size());
     for (const auto& t : st->toplevels) sorted_tls.push_back(t.get());
@@ -107,10 +87,8 @@ void scene_render(State* st, int64_t frame_time_ns) {
             it.surface = s;
             it.x = tl_x;
             it.y = tl_y;
-            // C03-A10: 90/270 buffer transforms swap the surface's logical w/h.
             int tbw = s->buffer_w, tbh = s->buffer_h;
             buffer_transform_dimensions(tbw, tbh, s->current.buffer_transform);
-            // C05-02: buffer_scale — surface logical size = buffer size / scale.
             int scale = std::max(1, s->current.buffer_scale);
             int rw = (s->current.dst_w > 0) ? s->current.dst_w : tbw / scale;
             int rh = (s->current.dst_h > 0) ? s->current.dst_h : tbh / scale;
@@ -118,7 +96,6 @@ void scene_render(State* st, int64_t frame_time_ns) {
             it.h = (rh > 0) ? rh : t->height;
             items.push_back(it);
         }
-        // C05-01: collect subsurfaces (children in stored z-order; default: above parent).
         for (Surface* child : s->children) {
             if (!child) continue;
             collect_surface_items(child,
@@ -130,7 +107,6 @@ void scene_render(State* st, int64_t frame_time_ns) {
     for (const auto& p : st->popups) {
         if (!p->mapped || !p->surface) continue;
         Surface* s = p->surface;
-        // C05-03: apply wl_surface.offset to compositor render position.
         int pp_x = p->x + s->current.offset_x;
         int pp_y = p->y + s->current.offset_y;
         if (s->current_buffer && !s->acquire_wait_failed) {
@@ -138,10 +114,8 @@ void scene_render(State* st, int64_t frame_time_ns) {
             it.surface = s;
             it.x = pp_x;
             it.y = pp_y;
-            // C03-A10: 90/270 buffer transforms swap the surface's logical w/h.
             int tbw = s->buffer_w, tbh = s->buffer_h;
             buffer_transform_dimensions(tbw, tbh, s->current.buffer_transform);
-            // C05-02: buffer_scale — surface logical size = buffer size / scale.
             int scale = std::max(1, s->current.buffer_scale);
             int rw = (s->current.dst_w > 0) ? s->current.dst_w : tbw / scale;
             int rh = (s->current.dst_h > 0) ? s->current.dst_h : tbh / scale;
@@ -149,7 +123,6 @@ void scene_render(State* st, int64_t frame_time_ns) {
             it.h = (rh > 0) ? rh : p->height;
             items.push_back(it);
         }
-        // C05-01: collect subsurfaces for popups too.
         for (Surface* child : s->children) {
             if (!child) continue;
             collect_surface_items(child,
@@ -159,7 +132,6 @@ void scene_render(State* st, int64_t frame_time_ns) {
         }
     }
 
-    // Damage union (output coords).
     Rect damage{};
     bool any_damage = false;
     for (const auto& t : st->toplevels) {
@@ -167,7 +139,6 @@ void scene_render(State* st, int64_t frame_time_ns) {
         std::vector<Rect> per;
         scene_accumulate_damage(st, t->surface, per);
         for (const auto& r : per) {
-            // shift by toplevel position
             damage = rect_union(damage, Rect{ r.x + t->x, r.y + t->y, r.w, r.h });
             any_damage = true;
         }
@@ -182,8 +153,6 @@ void scene_render(State* st, int64_t frame_time_ns) {
         }
     }
 
-    // Cursor: prefer Wine's own cursor surface (wl_pointer.set_cursor) drawn at
-    // the pointer; fall back to the compositor arrow until Wine sets one.
     Surface* cs = st->seat.ptr.cursor_surface;
     bool wine_cursor = st->show_cursor && cs && cs->texture &&
                        cs->buffer_kind != BufferKind::None &&
@@ -201,26 +170,16 @@ void scene_render(State* st, int64_t frame_time_ns) {
                              static_cast<int>(st->seat.ptr.y),
                              st->show_cursor && !wine_cursor);
 
-    // When Android has attached one SurfaceView per xdg_toplevel, the primary
-    // output is only a tiny lifetime/Wayland-output anchor. Clear it instead of
-    // drawing a duplicate desktop containing every Linux client. Each client
-    // is rendered below into its own Android Surface/EGLSurface. If no client
-    // output is attached yet, preserve the normal single-output fallback.
-    for (auto& plasma_it : items) if (plasma_it.surface) plasma_it.surface->buffer_sampled = true;  // PLASMA-WLOPT-MARK
+    for (auto& plasma_it : items) if (plasma_it.surface) plasma_it.surface->buffer_sampled = true;
     const bool embedded_outputs = st->renderer->has_window_outputs() || !st->vulkan_outputs.empty();
     if (embedded_outputs) {
         st->renderer->set_cursor(0, 0, false);
-        st->renderer->skip_primary_frame();  // no clear/swap for a surface nobody sees
+        st->renderer->skip_primary_frame();
     } else {
         st->renderer->render_scene(items, any_damage ? &damage : nullptr,
                                    frame_time_ns);
     }
 
-    // PlasmaDroid window embedding: each mapped xdg_toplevel with an attached
-    // Android Surface receives its own Vulkan output. Buffers are imported into
-    // that output's Vulkan cache; EGL/GLES is used only after an explicit Vulkan
-    // teardown when that output needs a compatibility fallback. Popups and
-    // subsurfaces remain with their owning toplevel.
     for (const Toplevel* t : sorted_tls) {
         if (!t || !t->mapped || t->minimized || !t->surface) continue;
         std::vector<RenderItem> client_items;
@@ -270,15 +229,12 @@ void scene_render(State* st, int64_t frame_time_ns) {
                     client_items);
             }
         }
-        for (auto& plasma_ci : client_items) if (plasma_ci.surface) plasma_ci.surface->buffer_sampled = true;  // PLASMA-WLOPT-MARK2
+        for (auto& plasma_ci : client_items) if (plasma_ci.surface) plasma_ci.surface->buffer_sampled = true;
         auto vkOutput = st->vulkan_outputs.find(t->id);
         if (vkOutput != st->vulkan_outputs.end() && vkOutput->second) {
             if (vkOutput->second->render(client_items, frame_time_ns))
                 continue;
 
-            // Vulkan render/import failed for this output. Destroy the Vulkan
-            // swapchain first, then connect EGL to the retained SurfaceView.
-            // This avoids competing Vulkan/EGL native-window API connections.
             vkOutput->second->teardown();
             st->vulkan_outputs.erase(vkOutput);
             auto fallback = st->vulkan_fallback_windows.find(t->id);
@@ -295,17 +251,8 @@ void scene_render(State* st, int64_t frame_time_ns) {
             st->renderer->render_scene_to_window_output(t->id, client_items, frame_time_ns);
     }
 
-    // Fix 1: wl_buffer.release after swap. Per the Wayland spec, the compositor
-    // must send wl_buffer.release only when it is done with the buffer and the
-    // GPU is no longer sampling it. Deferred from surface_commit() → released
-    // here after eglSwapBuffers returns. See wayland-book §sub-surface-buffers
-    // and https://wayland.app/protocols/wayland#wl_buffer
     drain_buffer_releases(st);
 
-    // Drain frame callbacks on every drawn surface (Wayland requires the
-    // server to fire `done` on the wl_callback once the frame has been
-    // submitted to the display, so the client knows it can request the
-    // next one).
     uint32_t time_ms = static_cast<uint32_t>(frame_time_ns / 1'000'000);
     for (auto& it : items) {
         Surface* s = it.surface;
@@ -315,13 +262,9 @@ void scene_render(State* st, int64_t frame_time_ns) {
             wl_resource_destroy(cb);
         }
         s->frame_callbacks.clear();
-        // Damage consumed for this frame.
         s->damage_surface.clear();
     }
 
-    // Fix 10: fire frame callbacks for surfaces that have pending callbacks but
-    // were NOT in the rendered items list (offscreen, unmapped, subsurface-only).
-    // Stalling these clients indefinitely would deadlock their render loops.
     for (auto& up : st->all_surfaces) {
         Surface* s = up.get();
         if (!s || s->frame_callbacks.empty()) continue;
@@ -338,9 +281,6 @@ void scene_render(State* st, int64_t frame_time_ns) {
         }
     }
 
-    // C05-07: dispatch presentation feedback from inside scene_render where
-    // the rendered items list is in scope. Surfaces in 'items' get 'presented';
-    // all others with pending feedback get 'discarded' (spec requires binary outcome).
     {
         std::vector<Surface*> rendered;
         rendered.reserve(items.size());

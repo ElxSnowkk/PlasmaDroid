@@ -1,20 +1,3 @@
-// labwc.cpp — Piperella Wayland compositor lifecycle + global registration.
-//
-// Per-protocol implementations live in their own translation units:
-//   surface.cpp        — wl_compositor / wl_subcompositor / wl_surface / wl_region / wl_subsurface
-//   xdg_shell.cpp      — xdg_wm_base / xdg_surface / xdg_toplevel / xdg_popup / decoration manager
-//   seat.cpp           — wl_seat (kbd+ptr+touch) / pointer-constraints / relative-pointer / xdg-output
-//   dmabuf.cpp         — zwp_linux_dmabuf_v1 v4 + feedback
-//   presentation.cpp   — wp_presentation + wp_presentation_feedback
-//   data_device.cpp    — wl_data_device_manager
-//   viewporter.cpp     — wp_viewporter
-//   text_input.cpp     — zwp_text_input_v3
-//   scene.cpp          — z-order traversal + damage union → renderer
-//
-// Threading mirrors COMPOSITOR.md "Architecture":
-//   - dispatch thread: wl_event_loop epoll, never frame-gated
-//   - render thread:   compositor_on_vsync() called from Choreographer
-//   - JNI thread:      lifecycle + input forwarding
 
 #include "labwc.h"
 #include "egl_renderer.h"
@@ -44,15 +27,11 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// The single global State* is defined in surface.cpp; the double-start guard in
-// compositor_start() and the teardown in compositor_stop() reference it here.
 extern State* g_state;
 
 namespace {
 
 constexpr uint32_t WL_OUTPUT_VERSION = 4;
-
-// ---------- wl_output --------------------------------------------------------
 
 void output_release(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 const struct wl_output_interface output_impl = { output_release };
@@ -96,8 +75,6 @@ void output_bind(wl_client* client, void* data, uint32_t version, uint32_t id) {
          st->output.width_px, st->output.height_px, st->output.refresh_mhz);
 }
 
-// ---------- dispatch + socket ------------------------------------------------
-
 void dispatch_loop(State* st) {
     LOGI("Dispatch thread started");
     ATrace_beginSection("Piperella dispatch loop");
@@ -111,7 +88,6 @@ void dispatch_loop(State* st) {
         wl_display_flush_clients(st->display);
         if (ATrace_isEnabled()) ATrace_endSection();
 
-        // Heartbeat: write to compositor.alive every 500ms
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_heartbeat).count();
         if (elapsed >= 500) {
@@ -125,7 +101,6 @@ void dispatch_loop(State* st) {
                      alive_path.c_str(), strerror(errno));
             }
             last_heartbeat = now;
-            // Send xdg_wm_base ping every ~2 s (every 4th 500 ms heartbeat).
             if (++ping_tick >= 4) {
                 ping_tick = 0;
                 xdg_shell_ping_clients(st);
@@ -165,7 +140,6 @@ bool bind_socket(State* st) {
              st->socket_dir.c_str());
         return false;
     }
-    // Also add piperella-wayland-0 so Kotlin's isSocketReady check succeeds.
     unlink((st->socket_dir + "/piperella-wayland-0").c_str());
     if (wl_display_add_socket(st->display, "piperella-wayland-0") != 0) {
         LOGW("wl_display_add_socket(piperella-wayland-0) failed (non-fatal)");
@@ -182,12 +156,7 @@ bool bind_socket(State* st) {
     return true;
 }
 
-}  // namespace
-
-// ============================================================================
-// UI-thread → dispatch-thread marshalling via eventfd.
-// All entrypoints that touch libwayland globals must run on the dispatch thread.
-// ============================================================================
+}
 
 void post_to_dispatch(State* st, std::function<void()> fn) {
     if (!st) return;
@@ -200,8 +169,6 @@ void post_to_dispatch(State* st, std::function<void()> fn) {
     if (written != sizeof(pulse)) {
         LOGW("post_to_dispatch: eventfd write returned %zd (errno=%d) — removing orphaned fn",
              written, errno);
-        // C20-12: Remove the function we just pushed since the eventfd write failed
-        // and the dispatch loop will not be woken to drain it.
         std::lock_guard<std::mutex> g2(st->dispatch_queue_mutex);
         if (!st->dispatch_queue.empty()) st->dispatch_queue.pop_back();
     }
@@ -223,14 +190,9 @@ int drain_dispatch_queue(int fd, uint32_t, void* data) {
     return 0;
 }
 
-// ============================================================================
-// Public C interface
-// ============================================================================
-
 extern "C" CompositorHandle*
 compositor_start(ANativeWindow* window, const char* socket_dir,
                  const char* data_dir, int width, int height, int refresh_mhz) {
-    // Prevent double-start — g_state is set at the end of this function.
     if (g_state != nullptr) {
         LOGE("compositor_start: compositor already running");
         return reinterpret_cast<CompositorHandle*>(g_state);
@@ -247,11 +209,6 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
     st->output.width_px      = width  > 0 ? width  : 1920;
     st->output.height_px     = height > 0 ? height : 1080;
     st->output.refresh_mhz   = refresh_mhz > 0 ? refresh_mhz : 60000;
-    // NOTE (vk44): keep the default 290x130mm (~112 DPI, labwc.h) physical size.
-    // vk43 briefly advertised Deck-like 216 DPI here, but the small-UI bug was
-    // Wine LogPixels=192 making Steam create a 2x (2560x1600) window on the
-    // 1280x800 output — fixed in WineInit.ensureDpi (LogPixels=96). High wl_output
-    // DPI risks re-adding monitor-DPI scaling on top.
 
     if (!ensure_socket_dir(st->socket_dir)) {
         delete st; return nullptr;
@@ -261,7 +218,6 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
     st->event_loop = wl_display_get_event_loop(st->display);
     if (!bind_socket(st)) { wl_display_destroy(st->display); delete st; return nullptr; }
 
-    // Built-in wl_shm.
     if (wl_display_init_shm(st->display) != 0) {
         LOGE("wl_display_init_shm failed — SHM required, aborting");
         wl_display_destroy(st->display);
@@ -270,13 +226,10 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
     }
     LOGI("wl_shm initialised (default ARGB8888 + XRGB8888)");
 
-    // wl_output.
     st->g_output = wl_global_create(st->display, &wl_output_interface,
                                     WL_OUTPUT_VERSION, st, output_bind);
     if (!st->g_output) { LOGE("wl_output global failed"); }
 
-    // Fix 17: check critical globals; non-critical ones (text_input, decoration,
-    // data_device, viewporter, xdg_output) log a warning but do not abort.
     if (!surface_globals_register(st) ||
         !xdg_shell_globals_register(st) ||
         !seat_globals_register(st)) {
@@ -285,10 +238,6 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
         delete st;
         return nullptr;
     }
-    // NOTE: zwp_linux_dmabuf_v1 is registered LATER, after the renderer exists
-    // (dmabuf_globals_register needs renderer->has_dmabuf_import()). Registering
-    // it here always early-returned, so the global was never advertised and
-    // every client silently fell back to wl_shm — no real dmabuf import ever ran.
     if (!xdg_output_globals_register(st))
         LOGW("xdg_output global registration failed (non-critical)");
     if (!presentation_globals_register(st))
@@ -305,8 +254,6 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
         LOGW("fractional_scale_globals_register failed (non-fatal)");
     if (!activation_globals_register(st))
         LOGW("activation_globals_register failed (non-fatal)");
-    // syncobj is registered LATER (after renderer init) — it needs the DRM fd
-    // and timeline-syncobj capability, neither of which exists yet here.
     if (!gamepad_globals_register(st))
         LOGW("gamepad_globals_register failed (non-fatal)");
     if (!tearing_control_globals_register(st))
@@ -334,14 +281,9 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
     if (!xdg_foreign_globals_register(st))
         LOGW("xdg_foreign_globals_register failed (non-fatal)");
 
-    // zwp_linux_dmabuf_v1 já no start (antes de qualquer renderer/Surface): o cliente
-    // libhybris-wayland só olha o registry uma vez, ao criar o EGLDisplay. Ainda é feito
-    // antes de a dispatch thread existir, então não há corrida com wl_global_create.
     if (!dmabuf_globals_register(st))
         LOGW("dmabuf global registration failed at start");
 
-    // Renderer (best-effort; null renderer leaves the compositor alive but
-    // headless, useful for protocol-only smoke tests).
     if (st->window) {
         st->renderer = std::make_unique<EglRenderer>();
         if (!st->renderer->init(st->window,
@@ -351,19 +293,11 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
             st->renderer.reset();
         } else {
             st->renderer->build_dmabuf_feedback_table(st);
-            // Start the AHardwareBuffer pool — compositor allocates AHWBs on
-            // request and sends dmabuf fds to clients that can't self-allocate.
             st->ahwb_pool_started = ahwb_pool_start(st);
-            // Now that the renderer (and its dmabuf-import capability + feedback
-            // table) exist, advertise zwp_linux_dmabuf_v1. This is the global
-            // Turnip/Mesa needs for Vulkan dmabuf swapchains.
             if (!dmabuf_globals_register(st))
                 LOGW("dmabuf global registration failed");
-            // Explicit sync (wp_linux_drm_syncobj_v1) — also gated on the
-            // renderer's DRM timeline-syncobj capability.
             if (!syncobj_globals_register(st))
                 LOGW("syncobj global registration failed");
-            // VRR: set initial frame rate hint on the window.
             float refresh_hz = st->output.refresh_mhz / 1000.0f;
             st->renderer->set_frame_rate(st->window, refresh_hz,
                 ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT);
@@ -376,8 +310,6 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
 
     st->running.store(true, std::memory_order_release);
     st->dispatch_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    // Fix 5: error-check eventfd — a -1 fd passed to wl_event_loop_add_fd
-    // causes a crash inside libwayland's epoll_ctl.
     if (st->dispatch_fd < 0) {
         LOGE("eventfd failed: %s", strerror(errno));
         wl_display_destroy(st->display);
@@ -386,7 +318,6 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
     }
     wl_event_loop_add_fd(st->event_loop, st->dispatch_fd, WL_EVENT_READABLE,
                          drain_dispatch_queue, st);
-    // Start audio engine (AAudio output + virtual ALSA socket sink).
     st->audio_engine = audio_engine_create(st->data_dir.c_str());
     if (!st->audio_engine) {
         LOGW("Audio engine failed to start (non-fatal)");
@@ -395,13 +326,11 @@ compositor_start(ANativeWindow* window, const char* socket_dir,
              audio_engine_get_socket_path(st->audio_engine));
     }
 
-    // Create notification manager.
     st->notification_mgr = notification_manager_create();
     if (!st->notification_mgr) {
         LOGW("Notification manager failed to create (non-fatal)");
     }
 
-    // C20-01: Wrap std::thread creation in try/catch to handle resource exhaustion.
     try {
         st->dispatch_thread = std::thread(dispatch_loop, st);
     } catch (const std::system_error& e) {
@@ -427,13 +356,10 @@ compositor_on_window_resized(CompositorHandle* h, int w, int height) {
         int old_h = st->output.height_px;
         st->output.width_px  = w;
         st->output.height_px = height;
-        // Rotation: re-configure fullscreen/output-sized toplevels to the new
-        // dimensions, otherwise clients keep rendering at the old size.
         if (old_w != w || old_h != height)
             xdg_shell_output_resized(st, old_w, old_h);
         if (st->renderer) {
             st->renderer->on_resize(w, height);
-            // VRR: refresh frame rate hint in case window changed.
             if (st->frame_rate_hz > 0.0f && st->window) {
                 st->renderer->set_frame_rate(st->window, st->frame_rate_hz,
                     static_cast<int32_t>(st->frame_rate_compat));
@@ -445,10 +371,7 @@ compositor_on_window_resized(CompositorHandle* h, int w, int height) {
                 w, height, st->output.refresh_mhz);
             if (wl_resource_get_version(r) >= 2) wl_output_send_done(r);
         }
-        // C02-A2: Propagate geometry change to xdg_output resources.
         xdg_output_update_all(st);
-        // C10-14: Re-send preferred_scale to all surfaces with a fractional
-        // scale resource so clients can re-render at the correct scale.
         fractional_scale_update_all(st);
         ATrace_endSection();
     });
@@ -458,12 +381,6 @@ extern "C" void
 compositor_on_window_destroyed(CompositorHandle* h) {
     auto* st = reinterpret_cast<State*>(h);
     if (!st) return;
-    // EGL teardown + ANativeWindow release must happen synchronously on
-    // the calling (UI) thread so that any pending Choreographer vsync
-    // callback that fires after stopVsync() finds renderer == nullptr
-    // instead of calling eglMakeCurrent on a stale EGLSurface.
-    // EGL and ANativeWindow operations do NOT touch libwayland and are
-    // safe on any thread; scene_mutex serializes with the dispatch thread.
     {
         std::lock_guard<std::mutex> g(st->scene_mutex);
         for (auto& output : st->vulkan_outputs)
@@ -482,14 +399,9 @@ compositor_on_window_destroyed(CompositorHandle* h) {
             st->window = nullptr;
         }
     }
-    // Release any buffers still queued for a swap that will never happen —
-    // the GPU is done with them now that the renderer is gone. Must run on
-    // the dispatch thread (it sends wayland events); while backgrounded,
-    // subsequent commits keep the queue drained via the !renderer branch in
-    // apply_pending_state.
     post_to_dispatch(st, [st]() {
         std::lock_guard<std::mutex> g(st->scene_mutex);
-        if (st->renderer) return;  // window already came back
+        if (st->renderer) return;
         drain_buffer_releases(st);
         wl_display_flush_clients(st->display);
     });
@@ -500,10 +412,6 @@ extern "C" void
 compositor_on_window_recreated(CompositorHandle* h, ANativeWindow* new_window) {
     auto* st = reinterpret_cast<State*>(h);
     if (!st) return;
-    // EGL init must happen synchronously (same thread, same rationale as
-    // compositor_on_window_destroyed) — the Kotlin caller invokes
-    // startVsync() immediately after this returns, so the renderer must
-    // be ready before the first Choreographer callback arrives.
     {
         std::lock_guard<std::mutex> g(st->scene_mutex);
         if (st->window) ANativeWindow_release(st->window);
@@ -516,16 +424,11 @@ compositor_on_window_recreated(CompositorHandle* h, ANativeWindow* new_window) {
             return;
         }
         st->renderer->build_dmabuf_feedback_table(st);
-        // A headless-first PlasmaDroid session can accept wl_shm clients before
-        // an Android output Surface exists. Publish DMA-BUF/syncobj globals as
-        // soon as the output renderer is attached so later clients can use the
-        // zero-copy GPU path instead of being permanently limited to wl_shm.
         if (!st->g_dmabuf && !dmabuf_globals_register(st))
             LOGW("dmabuf global registration failed after headless start");
         if (!st->g_syncobj && !syncobj_globals_register(st))
             LOGW("syncobj global registration failed after headless start");
         if (!st->ahwb_pool_started) st->ahwb_pool_started = ahwb_pool_start(st);
-        // VRR: restore frame rate hint on the new window.
         if (st->frame_rate_hz > 0.0f) {
             st->renderer->set_frame_rate(new_window, st->frame_rate_hz,
                 static_cast<int32_t>(st->frame_rate_compat));
@@ -544,15 +447,10 @@ compositor_on_window_recreated(CompositorHandle* h, ANativeWindow* new_window) {
             }
         }
     }
-    // Force a full recomposite on the first vsync: damage_pending may have
-    // been consumed by a rendererless vsync while backgrounded, and without
-    // it the new surface stays black until a client happens to commit.
     st->damage_pending.store(true, std::memory_order_release);
     LOGI("Surface recreated; EGL rebuilt");
 }
 
-// Defined below near compositor_set_hdr_mode; applies a queued HDR mode
-// switch on this (render) thread where the EGL context is current.
 void apply_pending_hdr_locked(State* st);
 
 extern "C" bool
@@ -561,26 +459,19 @@ compositor_on_vsync(CompositorHandle* h, int64_t frame_time_ns) {
     auto* st = reinterpret_cast<State*>(h);
     if (!st) { if (ATrace_isEnabled()) ATrace_endSection(); return false; }
 
-    // Fix 3: bail out immediately if compositor_stop() has begun tearing down
-    // state — a Choreographer callback that fired before the stop completed
-    // must not access renderer or all_surfaces as they may be freed.
     if (st->stopping.load(std::memory_order_acquire)) { if (ATrace_isEnabled()) ATrace_endSection(); return false; }
 
     bool had_damage = st->damage_pending.exchange(false, std::memory_order_acq_rel);
     bool force_first_clear = st->renderer && st->renderer->needs_first_clear();
     if (!had_damage && !force_first_clear) {
         if (ATrace_isEnabled()) ATrace_endSection();
-        return false;  // Nothing changed since last frame — skip GPU work.
+        return false;
     }
 
     if (ATrace_isEnabled()) ATrace_beginSection("drain_deletes");
-    // Flush any GL textures pending deletion (must happen on render thread
-    // where EGL context is current).
     {
         std::lock_guard<std::mutex> g(st->pending_gl_delete_mutex);
         if (!st->pending_gl_deletes.empty() && st->renderer) {
-            // drain_pending_deletes calls eglMakeCurrent before glDeleteTextures,
-            // ensuring the context is current even on the first vsync after recreate.
             st->renderer->drain_pending_deletes(st->pending_gl_deletes);
         }
     }
@@ -590,18 +481,13 @@ compositor_on_vsync(CompositorHandle* h, int64_t frame_time_ns) {
     std::lock_guard<std::mutex> g(st->scene_mutex);
     if (!st->renderer) { if (ATrace_isEnabled()) ATrace_endSection(); if (ATrace_isEnabled()) ATrace_endSection(); return false; }
 
-    // Apply any queued HDR mode switch here, where the EGL context is current.
     apply_pending_hdr_locked(st);
 
-    // Check if any surface has an ASYNC tearing hint — if so, skip ADPF
-    // frame pacing (the client is driving its own timing).
     bool any_async_tearing = false;
     for (auto& up : st->all_surfaces) {
         if (up->tearing_hint == 1) { any_async_tearing = true; break; }
     }
 
-    // Deferred ADPF creation: first vsync runs on the Choreographer
-    // (render) thread, so gettid() here captures the correct thread ID.
     if (!st->adpf && !st->adpf_attempted && st->output.refresh_mhz > 0) {
         st->adpf_attempted = true;
         int32_t tid = static_cast<int32_t>(gettid());
@@ -621,28 +507,18 @@ compositor_on_vsync(CompositorHandle* h, int64_t frame_time_ns) {
     ATrace_endSection();
 
     if (ATrace_isEnabled()) ATrace_beginSection("buffer_import");
-    // Refresh shm- and dmabuf-backed textures whose buffer is still attached.
     for (auto& up : st->all_surfaces) {
         Surface* s = up.get();
         if (!s || !s->current_buffer) continue;
         if (s->buffer_kind == BufferKind::Shm
             || (s->buffer_kind == BufferKind::None
                 && wl_shm_buffer_get(s->current_buffer))) {
-            // C03-12: skip the re-upload unless the buffer changed or new damage
-            // arrived, or the texture hasn't been created yet.
             if (s->texture != 0 && !s->buffer_dirty) continue;
             st->renderer->import_shm(s, s->current_buffer);
             s->buffer_dirty = false;
         } else if (s->buffer_kind == BufferKind::Dmabuf && !s->dmabuf.fds.empty()) {
-            // Deferred dmabuf import on the render thread (EGL context current).
-            // Check the AHWB pool first: if this fd was allocated by the compositor's
-            // pool server, import via EGL_ANDROID_NATIVE_BUFFER_ANDROID (zero re-upload).
-            // The EGLImageKHR is a persistent live reference — skip re-import on
-            // subsequent frames unless the surface hasn't been imported yet.
             AHardwareBuffer* ahwb = (!s->dmabuf.fds.empty())
                 ? ahwb_from_fd(s->dmabuf.fds[0]) : nullptr;
-            // Explicit-sync acquire points must be waited regardless of the
-            // selected import backend (AHardwareBuffer, Vulkan DMA-BUF or EGL).
             s->acquire_wait_failed = false;
             if (s->acquire_point.syncobj_handle != 0 && !st->renderer->wait_acquire(s)) {
                 s->acquire_wait_failed = true;
@@ -652,8 +528,6 @@ compositor_on_vsync(CompositorHandle* h, int64_t frame_time_ns) {
                 continue;
             }
             if (ahwb && st->renderer->has_ahwb_import()) {
-                // Only import once — the EGLImageKHR stays valid while the AHWB
-                // lives. New CPU writes are immediately visible without re-import.
                 if (s->dmabuf.egl_image == EGL_NO_IMAGE_KHR) {
                     if (!st->renderer->import_ahwb(s, ahwb,
                             s->dmabuf.width, s->dmabuf.height, s->dmabuf.fourcc)) {
@@ -680,8 +554,6 @@ compositor_on_vsync(CompositorHandle* h, int64_t frame_time_ns) {
     scene_render(st, frame_time_ns);
 
     if (ATrace_isEnabled()) ATrace_beginSection("syncobj_release");
-    // Release-signal pass for wp_linux_drm_syncobj_v1.
-    // C06-11: gate on drm_syncobj_capable() — mirrors the acquire-path guard in egl_renderer.cpp.
     if (st->renderer && st->renderer->drm_fd() >= 0 &&
         st->renderer->drm_syncobj_capable()) {
         for (auto& up : st->all_surfaces) {
@@ -689,15 +561,12 @@ compositor_on_vsync(CompositorHandle* h, int64_t frame_time_ns) {
             if (!s || s->release_point.syncobj_handle == 0) continue;
             uint32_t h = s->release_point.syncobj_handle;
             uint64_t pt = s->release_point.timeline_point;
-            // C07-15: SIGNAL struct is 24 bytes — matches kernel drm_syncobj_timeline_array
-            // {u64 handles; u64 points; u32 count_handles; u32 flags} (no first_signaled/pad).
             struct { uint64_t handles; uint64_t points; uint32_t count_handles;
                      uint32_t flags; } arr = {};
             arr.handles = reinterpret_cast<uint64_t>(&h);
             arr.points = reinterpret_cast<uint64_t>(&pt);
             arr.count_handles = 1;
 #define DRM_IOC(nr,type) _IOC(_IOC_READ|_IOC_WRITE, 'd', nr, sizeof(type))
-            // C06-11: check and log ioctl failure (previously discarded).
             if (ioctl(st->renderer->drm_fd(), DRM_IOC(0xCD, arr), &arr) != 0) {
                 LOGW("SYNCOBJ_TIMELINE_SIGNAL failed: %s", strerror(errno));
             }
@@ -706,13 +575,6 @@ compositor_on_vsync(CompositorHandle* h, int64_t frame_time_ns) {
     }
     if (ATrace_isEnabled()) ATrace_endSection();
 
-    // C05-07: presentation_dispatch is now called from inside scene_render
-    // (where the rendered-items list is in scope), so no separate call here.
-
-    // C05-06: wake the dispatch thread immediately to flush frame callbacks
-    // and feedback events generated by scene_render. Without this, events
-    // would wait up to 50 ms for the next wl_event_loop_dispatch timeout.
-    // post_to_dispatch only takes dispatch_queue_mutex — safe under scene_mutex.
     post_to_dispatch(st, [st]() { wl_display_flush_clients(st->display); });
 
     if (adpf_start_ns > 0 && st->adpf) {
@@ -741,7 +603,6 @@ compositor_on_refresh_changed(CompositorHandle* h, int refresh_mhz) {
             if (wl_resource_get_version(r) >= 2) wl_output_send_done(r);
         }
 
-        // VRR: update frame rate hint on ANativeWindow.
         if (st->window && st->renderer) {
             float refresh_hz = refresh_mhz / 1000.0f;
             st->renderer->set_frame_rate(st->window, refresh_hz,
@@ -764,20 +625,12 @@ extern "C" bool
 compositor_set_hdr_mode(CompositorHandle* h, bool enabled) {
     auto* st = reinterpret_cast<State*>(h);
     if (!st || !st->window || !st->renderer) return false;
-    // Recreating the EGL surface must happen on the render (Choreographer)
-    // thread where the context is current — this entry point is reached from
-    // the client's JNI thread, and doing the eglMakeCurrent dance here failed
-    // with BAD_ACCESS, destroyed the live surface, and killed the vsync loop
-    // (frozen screen until force-close). Queue the request; it is applied at
-    // the top of compositor_on_vsync.
     st->pending_hdr.store(enabled ? 1 : 0, std::memory_order_release);
     st->damage_pending.store(true, std::memory_order_release);
     compositor_signal_vsync_needed();
     return true;
 }
 
-// Runs on the render thread (compositor_on_vsync) with scene_mutex held and
-// the EGL context current.
 void apply_pending_hdr_locked(State* st) {
     int req = st->pending_hdr.exchange(-1, std::memory_order_acq_rel);
     if (req < 0 || !st->window || !st->renderer) return;
@@ -794,13 +647,9 @@ void apply_pending_hdr_locked(State* st) {
             LOGW("HDR mode request failed — device may not support BT.2020 PQ");
         }
     } else {
-        // Restore the STARTUP configuration: default dataspace and a surface
-        // with no colorspace attribute. Recreating with SRGB_KHR (the old
-        // behaviour) enabled GL's automatic linear→sRGB encoding on a buffer
-        // that is already gamma-encoded — washed-out colors.
         ok = st->renderer->set_hdr_color_space(st->window,
-            /*data_space=*/0 /*ADATASPACE_UNKNOWN → reset to default*/,
-            /*colorspace_attr=*/0 /*no EGL_GL_COLORSPACE attribute*/);
+            0 ,
+            0 );
         if (ok) {
             st->output.hdr.color_space = HdrMetadata::ColorSpace::SdrBt709;
             st->output.hdr.hdr_capable = false;
@@ -815,53 +664,33 @@ compositor_stop(CompositorHandle* h) {
     if (!st) return;
     LOGI("Stopping compositor");
 
-    // Fix 3: signal vsync handler to bail out before we start tearing down
-    // renderer state — a Choreographer callback in flight must not access
-    // st->renderer after we reset it below.
     st->stopping.store(true, std::memory_order_release);
 
-    // C20-14: Shutdown mechanism: st->running.store(false) causes dispatch_loop
-    // to exit its while(st->running) condition on the next iteration.
-    // wl_display_terminate() is NOT called — the dispatch loop exits naturally
-    // on the next wl_event_loop_dispatch() return (50ms max timeout).
-    // thread.join() waits for the loop to finish cleanly.
     st->running.store(false, std::memory_order_release);
 
-    // Wake dispatch thread from wl_event_loop_dispatch immediately (C01-02).
     uint64_t pulse = 1;
-    // Fire-and-forget: wake the dispatch thread from wl_event_loop_dispatch.
-    // EAGAIN (counter at max) is practically unreachable; failure is non-fatal
-    // during shutdown — the thread will exit when running=false is observed
-    // on the next dispatch timeout (≤50ms). See post_to_dispatch() for the
-    // equivalent guarded write in the non-teardown path.
     if (write(st->dispatch_fd, &pulse, sizeof(pulse)) < 0 && errno != EAGAIN) {
         LOGW("compositor_stop: eventfd write failed: %s", strerror(errno));
     }
 
     if (st->dispatch_thread.joinable()) st->dispatch_thread.join();
 
-    // Drain any abandoned dispatch queue items (C01-06).
     {
         std::lock_guard<std::mutex> g(st->dispatch_queue_mutex);
         st->dispatch_queue.clear();
     }
 
-    // Close the eventfd that was used to wake the dispatch loop (C01-03).
     if (st->dispatch_fd >= 0) {
         ::close(st->dispatch_fd);
         st->dispatch_fd = -1;
     }
 
-    // Destroy Wayland clients BEFORE renderer teardown so surface_resource_destroy
-    // callbacks fire while the EGL context is still valid (C01-01, C01-A4, C01-R5).
     if (st->display) {
         wl_display_destroy_clients(st->display);
     }
 
     {
         std::lock_guard<std::mutex> g(st->scene_mutex);
-        // Drain pending GL deletes again — client destruction above may have
-        // queued new entries via surface_destroy_state.
         {
             std::lock_guard<std::mutex> dg(st->pending_gl_delete_mutex);
             if (st->renderer)
@@ -880,27 +709,22 @@ compositor_stop(CompositorHandle* h) {
         }
         if (st->window)   { ANativeWindow_release(st->window); st->window = nullptr; }
 
-        // ADPF destroy — inside scene_mutex for consistent locking (C01-A3).
         adpf_destroy(st->adpf);
         st->adpf = nullptr;
     }
 
     ahwb_pool_stop();
 
-    // Fix 16: close the dmabuf feedback memfd that build_dmabuf_feedback_table()
-    // created — it is never closed elsewhere.
     if (st->dmabuf_feedback_fd >= 0) {
         ::close(st->dmabuf_feedback_fd);
         st->dmabuf_feedback_fd = -1;
     }
 
-    // Stop audio engine.
     if (st->audio_engine) {
         audio_engine_destroy(st->audio_engine);
         st->audio_engine = nullptr;
     }
 
-    // Destroy notification manager.
     if (st->notification_mgr) {
         notification_manager_destroy(st->notification_mgr);
         st->notification_mgr = nullptr;
@@ -941,7 +765,6 @@ compositor_stop(CompositorHandle* h) {
     gamepad_globals_unregister(st);
     if (st->display)             wl_display_destroy(st->display);
 
-    // Unlink both sockets.
     if (!st->socket_path.empty()) unlink(st->socket_path.c_str());
     unlink((st->socket_dir + "/wayland-0").c_str());
     delete st;
@@ -990,8 +813,6 @@ extern "C" bool compositor_attach_client_window(CompositorHandle* h, uint64_t id
     if (st->egl_fallback_outputs.erase(id) != 0)
         st->renderer->detach_window_output(id);
 
-    // Keep one reference so an initialized Vulkan WSI can be torn down before
-    // switching this exact SurfaceView to EGL. Never attach both APIs together.
     ANativeWindow_acquire(window);
     st->vulkan_fallback_windows[id] = window;
 
@@ -1022,8 +843,6 @@ extern "C" bool compositor_attach_client_window(CompositorHandle* h, uint64_t id
     }
     if (attached) {
         st->damage_pending.store(true, std::memory_order_release);
-        // xdg configure is a Wayland event and therefore is sent by the
-        // dispatch thread, not from the Android SurfaceHolder callback.
         if (width > 0 && height > 0) {
             post_to_dispatch(st, [st, id, width, height]() {
                 std::lock_guard<std::mutex> dispatch_guard(st->scene_mutex);

@@ -26,7 +26,6 @@
 #include "tracee/tracee.h"
 #include "attribute.h"
 
-/* Specify where a notice is coming from. */
 typedef enum {
     SYSTEM,
     INTERNAL,
@@ -34,7 +33,6 @@ typedef enum {
     TALLOC,
 } Origin;
 
-/* Specify the severity of a notice. */
 typedef enum {
     ERROR,
     WARNING,
@@ -52,4 +50,4 @@ extern void note(const Tracee *tracee, Severity severity, Origin origin,
 extern int global_verbose_level;
 extern const char *global_tool_name;
 
-#endif				/* NOTE_H */
+#endif

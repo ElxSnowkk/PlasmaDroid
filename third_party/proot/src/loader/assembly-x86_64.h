@@ -20,14 +20,6 @@
  * 02110-1301 USA.
  */
 
-/* According to the x86_64 ABI, all registers have undefined values at
- * program startup except:
- *
- * - the instruction pointer (rip)
- * - the stack pointer (rsp)
- * - the rtld_fini pointer (rdx)
- * - the system flags (rflags)
- */
 #define BRANCH(stack_pointer, destination) do {			\
 	asm volatile (						\
 		"// Restore initial stack pointer.	\n\t"	\
@@ -42,7 +34,7 @@
 		"					\n\t"	\
 		"// Start the program.			\n\t"	\
 		"jmpq *%%rax				\n"	\
-		: /* no output */				\
+		: 				\
 		: "irm" (stack_pointer), "a" (destination)	\
 		: "memory", "cc", "rsp", "rdx");		\
 	__builtin_unreachable();				\

@@ -8,23 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-
-
-
-
-
-// Swap the active upscaler objects when the current context changes.
-//
-// Every name above is a GL object owned by the context that created it, and
-// gl/framebuffer.cpp redirects framebuffer 0 to g_renderFBO -- in a second
-// context that name refers to nothing, or to somebody else's object. The values
-// are saved and reloaded rather than reached through a pointer because they are
-// declared extern and read from several translation units.
-
 #pragma once
 
 #include <cstdlib>

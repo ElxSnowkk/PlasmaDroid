@@ -20,29 +20,25 @@
  * 02110-1301 USA.
  */
 
-#include <sys/types.h>		/* open(2), fstat(2), lseek(2), */
-#include <sys/stat.h>		/* open(2), fstat(2), */
-#include <sys/stat.h>		/* open(2), */
-#include <fcntl.h>		/* open(2), */
-#include <stdint.h>		/* *int*_t, *INT*_MAX, */
-#include <unistd.h>		/* fstat(2), read(2), lseek(2), */
-#include <sys/mman.h>		/* mmap(2), MAP_*, */
-#include <stdbool.h>		/* bool, true, false, */
-#include <assert.h>		/* assert(3), */
-#include <errno.h>		/* errno(3), */
-#include <string.h>		/* strerror(3), */
-#include <inttypes.h>		/* PRI*, */
-#include <endian.h>		/* be64toh(3), */
-#include <archive.h>		/* archive_*(3), */
-#include <archive_entry.h>	/* archive_entry*(3), */
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <stdbool.h>
+#include <assert.h>
+#include <errno.h>
+#include <string.h>
+#include <inttypes.h>
+#include <endian.h>
+#include <archive.h>
+#include <archive_entry.h>
 
 #include "extension/care/extract.h"
 #include "cli/note.h"
 
-/**
- * Extract the given @archive into the current working directory.
- * This function returns -1 if an error occured, otherwise 0.
- */
 static int extract_archive(struct archive *archive)
 {
     struct archive_entry *entry;
@@ -54,8 +50,6 @@ static int extract_archive(struct archive *archive)
 	| ARCHIVE_EXTRACT_ACL
 	| ARCHIVE_EXTRACT_FFLAGS | ARCHIVE_EXTRACT_XATTR;
 
-    /* Avoid spurious warnings.  One should test for the CAP_CHOWN
-     * capability instead but libarchive only does this test: */
     if (geteuid() == 0)
 	flags |= ARCHIVE_EXTRACT_OWNER;
 
@@ -84,7 +78,6 @@ static int extract_archive(struct archive *archive)
     return result;
 }
 
-/* Data used by archive_[open/read/close] callbacks.  */
 typedef struct {
     uint8_t buffer[4096];
     const char *path;
@@ -92,14 +85,6 @@ typedef struct {
     int fd;
 } CallbackData;
 
-/**
- * This callback is invoked by archive_open().  It returns ARCHIVE_OK
- * if the underlying file or data source is successfully opened.  If
- * the open fails, it calls archive_set_error() to register an error
- * code and message and returns ARCHIVE_FATAL.
- *
- *  -- man 3 archive_read_open.
- */
 static int open_callback(struct archive *archive, void *data_)
 {
     CallbackData *data = talloc_get_type_abort(data_, CallbackData);
@@ -108,7 +93,6 @@ static int open_callback(struct archive *archive, void *data_)
     off_t offset;
     int status;
 
-    /* Note: data->fd will be closed by close_callback().  */
     data->fd = open(data->path, O_RDONLY);
     if (data->fd < 0) {
 	archive_set_error(archive, errno, "can't open archive");
@@ -121,8 +105,6 @@ static int open_callback(struct archive *archive, void *data_)
 	return ARCHIVE_FATAL;
     }
 
-    /* Assume it's a regular archive if it physically can't be a
-     * self-extracting one.  */
     if (statf.st_size < (off_t) sizeof(AutoExtractInfo))
 	return ARCHIVE_OK;
 
@@ -141,8 +123,6 @@ static int open_callback(struct archive *archive, void *data_)
 
     if (status == sizeof(AutoExtractInfo)
 	&& strcmp(info.signature, AUTOEXTRACT_SIGNATURE) == 0) {
-	/* This is a self-extracting archive, retrieve it's
-	 * offset and size.  */
 
 	data->size_remaining = be64toh(info.size);
 	offset =
@@ -152,13 +132,9 @@ static int open_callback(struct archive *archive, void *data_)
 	     "archive found: offset = %" PRIu64 ", size = %" PRIu64
 	     "", (uint64_t) offset, data->size_remaining);
     } else {
-	/* This is not a self-extracting archive, assume it's
-	 * a regular one...  */
 	offset = 0;
 	data->size_remaining = SIZE_MAX;
 
-	/* ... unless a self-extracting archive really was
-	 * expected.  */
 	if (strcmp(data->path, "/proc/self/exe") == 0)
 	    return ARCHIVE_FATAL;
     }
@@ -172,19 +148,6 @@ static int open_callback(struct archive *archive, void *data_)
     return ARCHIVE_OK;
 }
 
-/**
- * This callback is invoked whenever the library requires raw bytes
- * from the archive.  The read callback reads data into a buffer, set
- * the @buffer argument to point to the available data, and return a
- * count of the number of bytes available.  The library will invoke
- * the read callback again only after it has consumed this data.  The
- * library imposes no constraints on the size of the data blocks
- * returned.  On end-of-file, the read callback returns zero.  On
- * error, the read callback should invoke archive_set_error() to
- * register an error code and message and returns -1.
- *
- *  -- man 3 archive_read_open.
- */
 static ssize_t read_callback(struct archive *archive, void *data_,
 			     const void **buffer)
 {
@@ -210,14 +173,6 @@ static ssize_t read_callback(struct archive *archive, void *data_,
     return size;
 }
 
-/**
- * This callback is invoked by archive_close() when the archive
- * processing is complete.  The callback returns ARCHIVE_OK on
- * success.  On failure, the callback invokes archive_set_error() to
- * register an error code and message and returns ARCHIVE_FATAL.
- *
- * -- man 3 archive_read_open
- */
 static int close_callback(struct archive *archive, void *data_)
 {
     CallbackData *data = talloc_get_type_abort(data_, CallbackData);
@@ -232,10 +187,6 @@ static int close_callback(struct archive *archive, void *data_)
     return ARCHIVE_OK;
 }
 
-/**
- * Extract the archive stored at the given @path.  This function
- * returns -1 if an error occurred, otherwise 0.
- */
 int extract_archive_from_file(const char *path)
 {
     struct archive *archive = NULL;
@@ -318,8 +269,6 @@ int extract_archive_from_file(const char *path)
 	    note(NULL, WARNING, INTERNAL, "read archive: %s",
 		 archive_error_string(archive));
     } else if (status != ARCHIVE_OK) {
-	/* Don't complain if no error message were registered,
-	 * ie. when testing for a self-extracting archive.  */
 	if (archive_error_string(archive) != NULL)
 	    note(NULL, ERROR, INTERNAL,
 		 "can't read archive: %s", archive_error_string(archive));

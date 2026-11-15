@@ -23,37 +23,31 @@
 #ifndef PATH_H
 #define PATH_H
 
-#include <sys/types.h>		/* pid_t, */
-#include <fcntl.h>		/* AT_FDCWD, */
-#include <limits.h>		/* PATH_MAX, */
+#include <sys/types.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <stdbool.h>
 
 #include "tracee/tracee.h"
 
-/* File type.  */
 typedef enum {
     REGULAR,
     SYMLINK,
 } Type;
 
-/* Path point-of-view.  */
 typedef enum {
     GUEST,
     HOST,
 
-    /* Used for bindings as specified by the user but not
-     * canonicalized yet (new_binding, initialize_binding).  */
     PENDING,
 } Side;
 
-/* Path with cached attributes.  */
 typedef struct {
     char path[PATH_MAX];
     size_t length;
     Side side;
 } Path;
 
-/* Path ending type.  */
 typedef enum {
     NOT_FINAL,
     FINAL_NORMAL,
@@ -63,7 +57,6 @@ typedef enum {
 
 #define IS_FINAL(a) ((a) != NOT_FINAL)
 
-/* Comparison between two paths.  */
 typedef enum Comparison {
     PATHS_ARE_EQUAL,
     PATH1_IS_PREFIX,
@@ -100,7 +93,6 @@ extern size_t substitute_path_prefix(char path[PATH_MAX],
 
 extern int readlink_proc_pid_fd(pid_t pid, int fd, char path[PATH_MAX]);
 
-/* Check if path interpretable relatively to dirfd, see openat(2) for details. */
 #define AT_FD(dirfd, path) ((dirfd) != AT_FDCWD && ((path) != NULL && (path)[0] != '/'))
 
-#endif				/* PATH_H */
+#endif

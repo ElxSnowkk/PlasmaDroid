@@ -20,16 +20,16 @@
  * 02110-1301 USA.
  */
 
-#include <unistd.h>		/* lstat(2), readlink(2), getpid(2), wirte(2), lseek(2), get*id(2), */
-#include <sys/types.h>		/* get*id(2), */
-#include <sys/stat.h>		/* struct stat, fchmod(2), */
-#include <linux/limits.h>	/* PATH_MAX, */
-#include <sys/utsname.h>	/* uname(2), */
-#include <stdio.h>		/* fprintf(3), fclose(3), */
-#include <errno.h>		/* errno, ENAMETOOLONG, */
-#include <string.h>		/* strcpy(3), */
-#include <endian.h>		/* htobe64(3), */
-#include <assert.h>		/* assert(3), */
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <linux/limits.h>
+#include <sys/utsname.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <endian.h>
+#include <assert.h>
 
 #include "extension/care/final.h"
 #include "extension/care/care.h"
@@ -39,11 +39,6 @@
 #include "path/temp.h"
 #include "cli/note.h"
 
-/**
- * Find in @care->volatile_envars the given @envar (format
- * "name=value").  This function returns the name of the variable if
- * found (format "name"), NULL otherwise.
- */
 static const char *find_volatile_envar(const Care *care, const char *envar)
 {
     const Item *volatile_envar;
@@ -61,12 +56,6 @@ static const char *find_volatile_envar(const Care *care, const char *envar)
 
 extern char **environ;
 
-/**
- * Archive in @care->archive the content of @file with the given
- * @name, then close it.  This function returns < 0 if an error
- * occured, otherwise 0.  Note: this function is called in @care's
- * destructor.
- */
 static int archive_close_file(const Care *care, FILE *file,
 			      const char *name)
 {
@@ -76,8 +65,6 @@ static int archive_close_file(const Care *care, FILE *file,
     int status;
     int fd;
 
-    /* Ensure everything is written into the file before archiving
-     * it.  */
     fflush(file);
 
     fd = fileno(file);
@@ -109,10 +96,6 @@ static int archive_close_file(const Care *care, FILE *file,
     return status;
 }
 
-/**
- * Return a copy -- attached to @context -- of @input with all '
- * (single quote) characters escaped.
- */
 static const char *escape_quote(TALLOC_CTX *context, const char *input)
 {
     char *output;
@@ -138,7 +121,6 @@ static const char *escape_quote(TALLOC_CTX *context, const char *input)
     return output;
 }
 
-/* Helpers for archive_* functions.  */
 #define N(format, ...)							\
 	do {								\
 		if (fprintf(file, format "\n", ##__VA_ARGS__) < 0) {	\
@@ -150,11 +132,6 @@ static const char *escape_quote(TALLOC_CTX *context, const char *input)
 
 #define C(format, ...) N(format " \\", ##__VA_ARGS__)
 
-/**
- * Archive the "re-execute.sh" file, according to the given @care.
- * This function returns < 0 if an error occured, 0 otherwise.  Note:
- * this function is called in @care's destructor.
- */
 static int archive_re_execute_sh(Care *care)
 {
     struct utsname utsname;
@@ -227,13 +204,6 @@ static int archive_re_execute_sh(Care *care)
     C("\"${PROOT-$(dirname $0)/proot}\"");
 
     if (care->volatile_paths != NULL) {
-	/* If a volatile path is relative to $HOME, use an
-	 * asymmetric binding.  For instance:
-	 *
-	 *     -b $HOME/.Xauthority:/home/user/.Xauthority
-	 *
-	 * where "/home/user" was the $HOME during the
-	 * original execution.  */
 	STAILQ_FOREACH(item, care->volatile_paths, link) {
 	    const char *name = talloc_get_name(item);
 	    if (name[0] == '$')
@@ -259,8 +229,6 @@ static int archive_re_execute_sh(Care *care)
     C("-w '%s' ", care->initial_cwd);
     C("-r \"$(dirname $0)/rootfs\"");
 
-    /* In case the program retrieves its DSOs from /proc/self/maps
-     * (eg. VLC). */
     C("-b \"$(dirname $0)/rootfs\"");
     N("${1+\"$@\"}");
     N("");
@@ -281,12 +249,6 @@ static int archive_re_execute_sh(Care *care)
     return archive_close_file(care, file, "re-execute.sh");
 }
 
-/**
- * Archive the "concealed-accesses.txt" file in @care->archive,
- * according to the content of @care->concealed_accesses.  This
- * function returns < 0 if an error occured, 0 otherwise.  Note: this
- * function is called in @care's destructor.
- */
 static int archive_concealed_accesses_txt(const Care *care)
 {
     const Item *item;
@@ -308,11 +270,6 @@ static int archive_concealed_accesses_txt(const Care *care)
     return archive_close_file(care, file, "concealed-accesses.txt");
 }
 
-/**
- * Archive the "README.txt" file in @care->archive.  This function
- * returns < 0 if an error occured, 0 otherwise.  Note: this function
- * is called in @care's destructor.
- */
 static int archive_readme_txt(const Care *care)
 {
     FILE *file;
@@ -366,11 +323,6 @@ static int archive_readme_txt(const Care *care)
 static int archive_myself(const Care *care) UNUSED;
 #endif
 
-/**
- * Archive the content pointed to by "/proc/self/exe" in
- * "@care->archive:@care->prefix/proot".  Note: this function is
- * called in @care's destructor.
- */
 static int archive_myself(const Care *care)
 {
     char path[PATH_MAX];
@@ -404,33 +356,25 @@ static int archive_myself(const Care *care)
     return archive(NULL, care->archive, path, location, &statl);
 }
 
-/**
- * Archive "re-execute.sh" & "proot" from @care.  This function
- * always returns 0.  Note: this is a Talloc destructor.
- */
 int finalize_care(Care *care)
 {
     char *extractor;
     int status;
 
-    /* Generate & archive the "re-execute.sh" script. */
     status = archive_re_execute_sh(care);
     if (status < 0)
 	note(NULL, WARNING, INTERNAL, "can't archive 're-execute.sh'");
 
-    /* Generate & archive the "concealed-accesses.txt" file. */
     status = archive_concealed_accesses_txt(care);
     if (status < 0)
 	note(NULL, WARNING, INTERNAL,
 	     "can't archive 'concealed-accesses.txt'");
 
-    /* Generate & archive the "README.txt" file. */
     status = archive_readme_txt(care);
     if (status < 0)
 	note(NULL, WARNING, INTERNAL, "can't archive 'README.txt'");
 
 #if defined(CARE_BINARY_IS_PORTABLE)
-    /* Archive "care" as "proot", these are the same binary. */
     status = archive_myself(care);
     if (status < 0)
 	note(NULL, WARNING, INTERNAL, "can't archive 'proot'");
@@ -438,14 +382,12 @@ int finalize_care(Care *care)
 
     finalize_archive(care->archive);
 
-    /* Append self/raw extracting information if needed.  */
     if (care->archive->fd >= 0 && care->archive->offset > 0) {
 	AutoExtractInfo info;
 	off_t position;
 
 	strcpy(info.signature, AUTOEXTRACT_SIGNATURE);
 
-	/* Compute the size of the archive.  */
 	position = lseek(care->archive->fd, 0, SEEK_CUR);
 	assert(position > care->archive->offset);
 	info.size = htobe64(position - care->archive->offset);

@@ -31,8 +31,6 @@ void atrace_counter(const char* name, int64_t value);
 }
 #include <android/trace.h>
 
-// RAII wrapper for ATrace sections. Use on hot paths to automatically
-// pair begin/endSection (with ATrace_isEnabled guard built in).
 class ScopedTrace {
 public:
     explicit ScopedTrace(const char* name) : name_(name) {

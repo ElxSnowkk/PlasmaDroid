@@ -23,7 +23,7 @@
 #ifndef BINDING_H
 #define BINDING_H
 
-#include <limits.h>		/* PATH_MAX, */
+#include <limits.h>
 #include <stdbool.h>
 
 #include "tracee/tracee.h"
@@ -62,4 +62,4 @@ extern int substitute_binding(const Tracee *tracee, Side side,
 extern void remove_binding_from_all_lists(const Tracee *tracee,
 					  Binding *binding);
 
-#endif				/* BINDING_H */
+#endif

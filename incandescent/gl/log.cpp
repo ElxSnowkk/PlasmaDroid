@@ -8,10 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-// Define a stub for __android_log_print if not on Android
-
 #include "log.h"
 #include <unistd.h>
 #include <mutex>

@@ -20,14 +20,14 @@
  * 02110-1301 USA.
  */
 
-#include <linux/auxvec.h>	/* AT_*,  */
-#include <assert.h>		/* assert(3),  */
-#include <errno.h>		/* E*,  */
-#include <unistd.h>		/* write(3), close(3), */
-#include <sys/types.h>		/* open(2), */
-#include <sys/stat.h>		/* open(2), */
-#include <fcntl.h>		/* open(2), */
-#include <string.h>		/* memcpy(3), */
+#include <linux/auxvec.h>
+#include <assert.h>
+#include <errno.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <string.h>
 
 #include "execve/auxv.h"
 #include "syscall/sysnum.h"
@@ -37,11 +37,6 @@
 #include "tracee/abi.h"
 #include "arch.h"
 
-
-/**
- * Add the given vector [@type, @value] to @vectors.  This function
- * returns -errno if an error occurred, otherwise 0.
- */
 int add_elf_aux_vector(ElfAuxVector **vectors, word_t type, word_t value)
 {
     ElfAuxVector *tmp;
@@ -51,7 +46,6 @@ int add_elf_aux_vector(ElfAuxVector **vectors, word_t type, word_t value)
 
     nb_vectors = talloc_array_length(*vectors);
 
-    /* Sanity checks.  */
     assert(nb_vectors > 0);
     assert((*vectors)[nb_vectors - 1].type == AT_NULL);
 
@@ -62,44 +56,30 @@ int add_elf_aux_vector(ElfAuxVector **vectors, word_t type, word_t value)
 	return -ENOMEM;
     *vectors = tmp;
 
-    /* Replace the sentinel with the new vector.  */
     (*vectors)[nb_vectors - 1].type = type;
     (*vectors)[nb_vectors - 1].value = value;
 
-    /* Restore the sentinel.  */
     (*vectors)[nb_vectors].type = AT_NULL;
     (*vectors)[nb_vectors].value = 0;
 
     return 0;
 }
 
-/**
- * Get the address of the the ELF auxiliary vectors table for the
- * given @tracee.  This function returns 0 if an error occurred.
- */
 word_t get_elf_aux_vectors_address(const Tracee *tracee)
 {
     word_t address;
     word_t data;
 
-    /* Sanity check: this works only in execve sysexit.  */
     assert(IS_IN_SYSEXIT2(tracee, PR_execve));
 
-    /* Right after execve, the stack layout is:
-     *
-     *     argc, argv[0], ..., 0, envp[0], ..., 0, auxv[0].type, auxv[0].value, ..., 0, 0
-     */
     address = peek_reg(tracee, CURRENT, STACK_POINTER);
 
-    /* Read: argc */
     data = peek_word(tracee, address);
     if (errno != 0)
 	return 0;
 
-    /* Skip: argc, argv, 0 */
     address += (1 + data + 1) * sizeof_word(tracee);
 
-    /* Skip: envp, 0 */
     do {
 	data = peek_word(tracee, address);
 	if (errno != 0)
@@ -110,20 +90,12 @@ word_t get_elf_aux_vectors_address(const Tracee *tracee)
     return address;
 }
 
-/**
- * Fetch ELF auxiliary vectors stored at the given @address in
- * @tracee's memory.  This function returns NULL if an error occurred,
- * otherwise it returns a pointer to the new vectors, in an ABI
- * independent form (the Talloc parent of this pointer is
- * @tracee->ctx).
- */
 ElfAuxVector *fetch_elf_aux_vectors(const Tracee *tracee, word_t address)
 {
     ElfAuxVector *vectors = NULL;
     ElfAuxVector vector;
     int status;
 
-    /* It is assumed the sentinel always exists.  */
     vectors = talloc_array(tracee->ctx, ElfAuxVector, 1);
     if (vectors == NULL)
 	return NULL;
@@ -137,7 +109,7 @@ ElfAuxVector *fetch_elf_aux_vectors(const Tracee *tracee, word_t address)
 	address += sizeof_word(tracee);
 
 	if (vector.type == AT_NULL)
-	    break;		/* Already added.  */
+	    break;
 
 	vector.value = peek_word(tracee, address);
 	if (errno != 0)
@@ -152,11 +124,6 @@ ElfAuxVector *fetch_elf_aux_vectors(const Tracee *tracee, word_t address)
     return vectors;
 }
 
-/**
- * Push ELF auxiliary @vectors to the given @address in @tracee's
- * memory.  This function returns -errno if an error occurred,
- * otherwise 0.
- */
 int push_elf_aux_vectors(const Tracee *tracee, ElfAuxVector *vectors,
 			 word_t address)
 {
@@ -187,9 +154,6 @@ int push_elf_aux_vectors(const Tracee *tracee, ElfAuxVector *vectors,
     return 0;
 }
 
-/**
- * Return the word of @tracee's size stored at @address.
- */
 static word_t load_word(const Tracee *tracee, const uint8_t *address)
 {
     uint32_t word32;
@@ -204,9 +168,6 @@ static word_t load_word(const Tracee *tracee, const uint8_t *address)
     return word64;
 }
 
-/**
- * Store @value as a word of @tracee's size at @address.
- */
 static void store_word(const Tracee *tracee, uint8_t *address,
 		       word_t value)
 {
@@ -219,12 +180,6 @@ static void store_word(const Tracee *tracee, uint8_t *address,
 	memcpy(address, &word64, sizeof(word64));
 }
 
-/**
- * Point AT_EXECFN to @tracee->execfn_addr in the first @size bytes of
- * the auxiliary vector at @vectors, laid out as the kernel hands it
- * to @tracee through PR_GET_AUXV or /proc/self/auxv.  This function
- * returns false if these bytes hold no AT_EXECFN entry.
- */
 bool fix_up_execfn(const Tracee *tracee, void *vectors, size_t size)
 {
     const size_t entry_size = 2 * sizeof_word(tracee);

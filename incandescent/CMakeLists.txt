@@ -13,8 +13,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-
-# glslang & SPIRV-Cross
 set(ENABLE_RTTI                ON  CACHE BOOL "Enables RTTI (will be took by glslang)" FORCE)
 set(ENABLE_HLSL                OFF CACHE BOOL "Disable HLSL input for glslang" FORCE)
 set(BUILD_EXTERNAL             OFF CACHE BOOL "Disable build external dependencies for glslang" FORCE)
@@ -38,9 +36,6 @@ set(SPIRV_CROSS_CLI            OFF CACHE BOOL "Disable CLI binary" FORCE)
 set(SPIRV_CROSS_STATIC         ON  CACHE BOOL "Prefer static libs" FORCE)
 set(SPIRV_CROSS_ENABLE_UTIL    OFF CACHE BOOL "Disable util" FORCE)
 
-# Incandescent: glslang e SPIRV-Cross rodam a CADA shader traduzido. O add_compile_options(-O3) mais abaixo só vale para o que for criado depois
-# dele, e nas variantes Debug o NDK compila essas duas bibliotecas com -O0 e asserts (traduções muito mais lentas = engasgos no jogo).
-# Aqui elas ganham -O2 sem debug info nem asserts em Debug/RelWithDebInfo (também compila mais rápido no Termux). Desligue com -DIG_OPTIMIZE_DEPS=OFF.
 option(IG_OPTIMIZE_DEPS "Compilar glslang/SPIRV-Cross com -O2 mesmo em Debug" ON)
 if (IG_OPTIMIZE_DEPS)
     foreach (_cfg DEBUG RELWITHDEBINFO)
@@ -65,7 +60,6 @@ endif()
 
 option(INC_ENABLE_LTO "Compilar o Incandescent com ThinLTO (usa muita RAM no link; desligado no Incandescent)" OFF)
 if (INC_ENABLE_LTO AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    # Check if ThinLTO or LTO is suppported
     include(CheckIPOSupported)
     include(CheckCCompilerFlag)
     include(CheckCXXCompilerFlag)
@@ -76,7 +70,6 @@ if (INC_ENABLE_LTO AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     check_cxx_compiler_flag("-flto" HAS_LTO_CXX)
 
     if (LTOSupported OR (HAS_LTO_C AND HAS_LTO_CXX))
-    # Check ThinLTO
     check_c_compiler_flag("-flto=thin" HAS_THINLTO_C)
     check_cxx_compiler_flag("-flto=thin" HAS_THINLTO_CXX)
     if (HAS_THINLTO_C AND HAS_THINLTO_CXX)
@@ -85,7 +78,6 @@ if (INC_ENABLE_LTO AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(-flto=thin)
         add_link_options(-flto=thin)
     else()
-        # ThinLTO is not supported
         message(STATUS "ThinLTO not available, fallback to CMAKE IPO")
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
@@ -94,12 +86,10 @@ if (INC_ENABLE_LTO AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     endif()
 endif()
 
-
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT MATCHES "AppleClang")
     add_compile_options(-O3 -ffunction-sections -fdata-sections)
     add_link_options(-Wl,--gc-sections)
 elseif (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-#    add_compile_options(/O2)
 else ()
     add_compile_options(-O2)
 endif()
@@ -154,7 +144,6 @@ add_library(${INC_TARGET} SHARED
     config/gpu_utils.cpp
     config/settings.cpp
     config/stats.cpp
-    # init.cpp por ÚLTIMO: o construtor estático que chama proc_init() roda depois dos globais dos outros arquivos.
     init.cpp
 )
 
@@ -169,21 +158,10 @@ target_link_libraries(${INC_TARGET} PRIVATE
 )
 
 if (NOT MSVC)
-    # Calls between this library's own translation units must land in this
-    # library. Without this, an internal call to an exported gl* symbol goes
-    # through a preemptible PLT slot, and in an Android app process the system
-    # libGLESv2 -- always in the global symbol scope -- can win the lookup: the
-    # DSA wrappers and the benchmark would then be calling the real driver where
-    # they meant the frontend, silently bypassing all state tracking. The
-    # symbols stay exported for dlsym and eglGetProcAddress; only who internal
-    # calls bind to changes. On the target, not in the AppleClang-guarded block
-    # above -- that block's condition has never been true (dangling NOT MATCHES),
-    # which is also why --gc-sections never made it into the link.
     target_link_options(${INC_TARGET} PRIVATE -Wl,-Bsymbolic-functions)
 endif()
 
 if(MACOS)
-    # iOS
     target_link_libraries(${INC_TARGET} PUBLIC
         "-F${CMAKE_SOURCE_DIR}/external"
         "-framework libEGL"
@@ -193,13 +171,11 @@ if(MACOS)
         "-framework QuartzCore"
     )
 elseif(ANDROID)
-    # Android
     target_link_libraries(${INC_TARGET} PUBLIC
         android
         log
     )
     else()
-    # Linux — EGL/GLES are loaded dynamically via dlopen
     target_link_libraries(${INC_TARGET} PUBLIC
         ${CMAKE_DL_LIBS}
     )

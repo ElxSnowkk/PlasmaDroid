@@ -8,7 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
 // The value a stub hands back when it has nothing to say. Defined out here rather
 // than inside the extern "C" block below because a template cannot have C language
 // linkage.
@@ -20,41 +19,6 @@
 // (gles/loader.cpp), so several of those entry points are reachable and were
 // answering an arbitrary value for a status or a boolean. `return f<void>();` is
 // legal in a void function, so the ~2400 void users need no change.
-
-
-
-
-
-
-
-
-// Resolve an EGL entry point from the backend library, once per call site.
-//
-// The initialiser is a lambda call rather than a `static bool first` flag, so
-// the compiler emits a thread-safe guard around it. The old shape was an
-// unsynchronised double-checked initialisation: both statics were
-// constant-initialised, so no guard was generated and nothing ordered the write
-// of the pointer against another thread's read of the flag. Two threads entering
-// any EGL wrapper for the first time could see `first == false` with the pointer
-// still null.
-//
-// A failed resolution is reported unconditionally: LOG_W compiles to nothing in
-// release builds (GLOBAL_DEBUG in gl/log.h), so the old warning never reached a
-// user's log and the caller went on to jump through the null pointer anyway.
-
-// Same, but bail out instead of calling through a null pointer. Use it for the
-// entry points a backend is genuinely allowed not to have -- the platform and
-// EXT variants -- where the old macro produced a crash rather than a failure the
-// caller could handle.
-
-// Sondas de diagnóstico (INC_GL_PROBE=1): amostram o conteúdo enviado às texturas e o pixel final antes do swap.
-
-
-
-
-
-// Diagnóstico em tempo de execução (sem recompilar com GLOBAL_DEBUG): INC_GL_ERRORS=1 loga cada erro de GL com
-// arquivo:linha na saída de erro (até ~400 ocorrências distintas). Desligado = custo de um bool.
 
 #ifndef INCANDESCENT_GLES_LOADER_H_
 #define INCANDESCENT_GLES_LOADER_H_

@@ -1,7 +1,3 @@
-// idle_inhibit.cpp — zwp_idle_inhibit_manager_v1 v1 minimal implementation.
-// Allows clients to inhibit the idle / screen-blanking behavior of the
-// compositor for surfaces that are visually important (fullscreen video,
-// games).
 #include "labwc.h"
 extern "C" {
 #include "idle-inhibit-protocol.h"
@@ -22,7 +18,7 @@ static const struct zwp_idle_inhibitor_v1_interface inhibitor_impl = {
 
 static void mgr_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 static void mgr_create_inhibitor(wl_client* c, wl_resource*, uint32_t id,
-                                  wl_resource* /*surface_res*/) {
+                                  wl_resource* ) {
     wl_resource* r = wl_resource_create(c, &zwp_idle_inhibitor_v1_interface,
                                          II_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }

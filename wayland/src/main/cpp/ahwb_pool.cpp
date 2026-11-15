@@ -1,19 +1,3 @@
-// ahwb_pool.cpp — compositor-side AHardwareBuffer allocation pool.
-//
-// Listens on a Unix socket ({xdg_runtime_dir}/piperella-ahwb) for client
-// connections. Each connection sends a 12-byte request (width u32, height u32,
-// format u32), the compositor allocates an AHardwareBuffer and sends its handle
-// back via AHardwareBuffer_sendHandleToUnixSocket. The client extracts the
-// underlying dmabuf fd from the native handle and uses it as a render target
-// via Mesa EGL's EGL_EXT_image_dma_buf_import. The compositor keeps the
-// AHardwareBuffer alive and imports it on each vsync via
-// EGL_ANDROID_NATIVE_BUFFER_ANDROID (no vendor EGL dmabuf import needed).
-//
-// Thread model: the socket server runs on a dedicated thread. The ino → AHWB
-// map is protected by a mutex. The map is read (without the lock) from the
-// render thread after the server thread has already inserted the entry and the
-// client has already done a roundtrip on the Wayland socket (guaranteeing
-// happens-before).
 
 #include "ahwb_pool.h"
 #include "labwc.h"
@@ -34,13 +18,11 @@
 #include <unistd.h>
 #include <unordered_map>
 
-// AHardwareBuffer_getNativeHandle is stable ABI since Android 29 but not in all
-// NDK header revisions. Declare the needed types and resolve at runtime.
 struct piperella_native_handle {
-    int version;  // sizeof(piperella_native_handle)
+    int version;
     int numFds;
     int numInts;
-    int data[0];  // first numFds entries are file descriptors
+    int data[0];
 };
 typedef const struct piperella_native_handle* (*pfn_getNH)(const AHardwareBuffer*);
 static pfn_getNH g_getNativeHandle = nullptr;
@@ -55,19 +37,16 @@ static void init_get_native_handle() {
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Map from dmabuf inode → AHardwareBuffer*. Allows the render thread to look
-// up the AHardwareBuffer when a client commits a buffer with a known fd.
 static std::mutex                           g_pool_mutex;
 static std::unordered_map<ino_t, AHardwareBuffer*> g_ino_to_ahwb;
 static int                                  g_listen_fd = -1;
 static std::thread                          g_thread;
 static bool                                 g_running = false;
 
-// Request layout sent by the client over the side socket.
 struct AhwbRequest {
     uint32_t width;
     uint32_t height;
-    uint32_t format;  // AHARDWAREBUFFER_FORMAT_* value
+    uint32_t format;
 };
 
 static void handle_connection(int conn_fd) {
@@ -84,7 +63,6 @@ static void handle_connection(int conn_fd) {
         return;
     }
 
-    // Default to ABGR8888 if the client requests an unsupported format.
     uint32_t fmt = req.format;
     if (fmt == 0) fmt = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
 
@@ -93,9 +71,6 @@ static void handle_connection(int conn_fd) {
     desc.height = req.height;
     desc.layers = 1;
     desc.format = fmt;
-    // GPU_COLOR_OUTPUT: client renders into this buffer.
-    // GPU_SAMPLED_IMAGE: compositor samples it as a texture.
-    // CPU_READ_RARELY: hint toward linear layout so Mesa can import implicitly.
     desc.usage  = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT
                 | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE
                 | AHARDWAREBUFFER_USAGE_CPU_READ_RARELY;
@@ -109,9 +84,6 @@ static void handle_connection(int conn_fd) {
         return;
     }
 
-    // Get the underlying dmabuf fd to record the inode.
-    // AHardwareBuffer_getNativeHandle is stable since API 29 but not in all
-    // NDK header revisions — resolve via dlsym.
     init_get_native_handle();
     ino_t ino = 0;
     if (g_getNativeHandle) {
@@ -123,8 +95,6 @@ static void handle_connection(int conn_fd) {
         }
     }
 
-    // Send the AHardwareBuffer handle to the client. The receiver calls
-    // AHardwareBuffer_recvHandleFromUnixSocket to reconstruct the AHWB.
     err = AHardwareBuffer_sendHandleToUnixSocket(ahwb, conn_fd);
     close(conn_fd);
 
@@ -141,9 +111,7 @@ static void handle_connection(int conn_fd) {
              req.width, req.height, fmt,
              (unsigned long long)ino, (void*)ahwb);
     } else {
-        // No inode — still keep the AHWB alive but it won't be matched.
         LOGW("ahwb: allocated but couldn't determine inode — won't be matched");
-        // Release; the client can still render but the compositor won't find it.
         AHardwareBuffer_release(ahwb);
     }
 }
@@ -231,8 +199,6 @@ AHardwareBuffer* ahwb_acquire_from_fd(int fd) {
     std::lock_guard<std::mutex> lk(g_pool_mutex);
     auto it = g_ino_to_ahwb.find(st.st_ino);
     if (it == g_ino_to_ahwb.end() || !it->second) return nullptr;
-    // Acquire while the pool lock is held so ahwb_pool_stop() cannot release
-    // the final pool reference between lookup and acquire.
     AHardwareBuffer_acquire(it->second);
     return it->second;
 }

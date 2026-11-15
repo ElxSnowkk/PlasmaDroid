@@ -1,6 +1,3 @@
-// tearing_control.cpp — wp_tearing_control_manager_v1 v1 minimal implementation.
-// Allows clients to hint that tearing (async page flips) is acceptable for
-// latency-sensitive content (games, drawing tablets).
 #include "labwc.h"
 extern "C" {
 #include "tearing-control-protocol.h"
@@ -13,8 +10,6 @@ extern "C" {
 extern State* g_state;
 static constexpr uint32_t TCM_VERSION = 1;
 
-// Per-surface tearing hint tracking (cannot modify Surface struct in labwc.h).
-// Default hint is VSYNC (0) per spec.
 static void tc_set_presentation_hint(wl_client*, wl_resource* r, uint32_t hint) {
     Surface* s = static_cast<Surface*>(wl_resource_get_user_data(r));
     if (!s) return;
@@ -24,7 +19,6 @@ static void tc_set_presentation_hint(wl_client*, wl_resource* r, uint32_t hint) 
 
 static void tc_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 
-// Clear the surface's back-pointer if the tearing-control object dies first.
 static void tc_resource_destroy(wl_resource* r) {
     Surface* s = static_cast<Surface*>(wl_resource_get_user_data(r));
     if (s && s->tearing_resource == r) s->tearing_resource = nullptr;
@@ -41,9 +35,6 @@ static void tcm_get_tearing_control(wl_client* c, wl_resource*, uint32_t id,
                                          TCM_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }
     wl_resource_set_implementation(r, &tc_impl, s, tc_resource_destroy);
-    // If the wl_surface is destroyed first, null this object's user_data so
-    // tc_set_presentation_hint sees s==null instead of writing through freed
-    // memory.
     if (s) {
         s->tearing_resource = r;
         s->destruction_hooks.push_back([](Surface* dead) {

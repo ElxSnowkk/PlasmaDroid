@@ -10,16 +10,6 @@
 // Só agem quando o driver GLES real é Mali (modo "auto") ou quando forçado; qualquer outra GPU segue o comportamento do Incandescent.
 // Chave do config.json: "maliTuning" = 0 desligado | 1 automático (padrão) | 2 forçado.
 
-
-// true se o driver GLES real é Mali/Arm (cacheado após a primeira consulta com contexto atual; sem contexto devolve false sem cachear).
-
-// true se os ajustes Mali estão ativos agora (maliTuning=2, ou =1 e GPU Mali).
-
-// Guia 3.6 e 7.2: glFinish() e glFlush() bloqueiam ou fecham o render pass e esvaziam o pipeline da GPU. O driver já descarrega sozinho quando precisa.
-
-// Guia 7.2: antes do swap, descarta depth/stencil do framebuffer padrão (não são usados fora do quadro), evitando gravá-los na memória.
-// Só age se o framebuffer de desenho atual for o padrão (0). Chamado pela camada EGL deste fork.
-
 #ifndef INCANDESCENT_MALI_TUNING_H
 #define INCANDESCENT_MALI_TUNING_H
 

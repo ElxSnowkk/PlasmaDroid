@@ -52,4 +52,4 @@ extern void print_current_regs(Tracee * tracee, int verbose_level,
 			       const char *message);
 extern void save_current_regs(Tracee * tracee, RegVersion version);
 
-#endif				/* TRACEE_REG_H */
+#endif

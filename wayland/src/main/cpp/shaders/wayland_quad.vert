@@ -1,8 +1,8 @@
 #version 450
 layout(push_constant) uniform QuadPush {
-    vec4 rect;       // x, y, width, height in output pixels
-    vec2 extent;     // output width, height
-    vec2 uvScale;    // 1,1 or vertical flip
+    vec4 rect;
+    vec2 extent;
+    vec2 uvScale;
     float opacity;
     float padding;
 } pc;

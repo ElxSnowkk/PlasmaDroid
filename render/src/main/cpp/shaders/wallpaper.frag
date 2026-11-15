@@ -53,7 +53,6 @@ float fbm(vec2 p) {
     }
     return value;
 }
-// Versão barata do fbm (3 oitavas, mesma normalização) para o laço de ondas do estilo Next.
 float fbm3(vec2 p) {
     float value = 0.0;
     float amplitude = 0.5;

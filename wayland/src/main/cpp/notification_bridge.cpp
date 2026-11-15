@@ -36,14 +36,11 @@ extern "C" int64_t notification_manager_push(NotificationManager* mgr,
     if (mgr->count < kMaxNotifications) {
         mgr->count++;
     } else {
-        // Ring buffer full — overwrite oldest.
-        // head already advanced past it.
     }
 
     LOGI("Notification pushed: %s — %s (id=%lld)",
          entry->package_name, entry->title, (long long)id);
 
-    // Fire callback if registered.
     if (mgr->callback) {
         mgr->callback(&mgr->entries[(mgr->head - 1 + kMaxNotifications) % kMaxNotifications],
                        mgr->callback_userdata);
@@ -60,7 +57,6 @@ extern "C" void notification_manager_remove(NotificationManager* mgr,
     for (int i = 0; i < mgr->count; ++i) {
         int idx = (mgr->head - mgr->count + i + kMaxNotifications) % kMaxNotifications;
         if (mgr->entries[idx].id == id) {
-            // Shift remaining entries forward.
             for (int j = i; j < mgr->count - 1; ++j) {
                 int src = (mgr->head - mgr->count + j + 1 + kMaxNotifications) % kMaxNotifications;
                 int dst = (mgr->head - mgr->count + j + kMaxNotifications) % kMaxNotifications;
@@ -115,7 +111,6 @@ extern "C" void notification_manager_remove_by_ext_id(NotificationManager* mgr,
         int idx = (mgr->head - mgr->count + i + kMaxNotifications) % kMaxNotifications;
         if (mgr->entries[idx].notification_id == notification_id &&
             strcmp(mgr->entries[idx].package_name, package_name) == 0) {
-            // Shift remaining entries forward.
             for (int j = i; j < mgr->count - 1; ++j) {
                 int src = (mgr->head - mgr->count + j + 1 + kMaxNotifications) % kMaxNotifications;
                 int dst = (mgr->head - mgr->count + j + kMaxNotifications) % kMaxNotifications;

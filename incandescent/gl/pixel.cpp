@@ -8,60 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-// Three tables that have to agree, and used to be shuffled together.
-//
-// gl_sizeof is keyed on the pixel-transfer TYPE and answers bytes -- per
-// component for an unpacked type, per whole pixel for a packed one.
-// pixel_sizeof is keyed on the FORMAT and answers components per pixel.
-// is_type_packed says which of the two readings applies.
-//
-// Format enums had leaked into the type table (GL_LUMINANCE_ALPHA, GL_ALPHA,
-// GL_DEPTH_COMPONENT, GL_COLOR_INDEX), sized internalformats and a texgen
-// coordinate had leaked into the format table (GL_RGB8, GL_RGBA8, GL_R32F,
-// GL_R11F_G11F_B10F, GL_R), and a format sat in the packed-type list
-// (GL_DEPTH_STENCIL) while the actual packed type it stands for
-// (GL_UNSIGNED_INT_24_8) was missing from it. Most of that was unreachable
-// through the one caller, but GL_R32F with GL_FLOAT really did answer 16 bytes
-// for a 4-byte texel, and every entry that was merely latent was a trap for the
-// next caller. Each table now holds only its own kind of enum.
-
-
-
-
-
-
-// ---------------------------------------------------------------------------
-// Pixel-store state
-//
-// Two halves that look alike and are not. The six parameters GLES does not have
-// are *stored* here, because there is nowhere else for them to live. The unpack
-// parameters GLES does have are only *mirrored* here: the driver still owns them,
-// and this is a copy kept so a transfer does not have to ask for them.
-// ---------------------------------------------------------------------------
-
-// Where each of the six lives in the per-context record, or nullptr for a pname
-// that is not one of them.
-
-// The mirror of the unpack parameters GLES does have, and the context it
-// describes.
-//
-// Thread-local because a context is current on one thread at a time, and keyed on
-// gl_state because that pointer is per context -- the same reason the six above
-// live behind it. The key is only half of what identifies a context, though: a
-// destroyed context's record can be handed back to the next one at the same
-// address, so a holder that has an id available should check that too. Nothing
-// here can: gl/pixel.cpp is linked by the host test harness, which has no EGL
-// layer to ask.
-
-
-// Where each GLES-native unpack parameter lives in the mirror, or nullptr for a
-// pname that is not one of them.
-
-// Mirror one write on its way to the driver. The value still goes to the driver
-// afterwards; this only records what it will be.
-
 #include "pixel.h"
 #include "log.h"
 #include "inc.h"

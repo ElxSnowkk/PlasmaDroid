@@ -20,10 +20,10 @@
  * 02110-1301 USA.
  */
 
-#include <talloc.h>		/* talloc*, */
-#include <sys/queue.h>		/* STAILQ_*, */
-#include <errno.h>		/* E*, */
-#include <assert.h>		/* assert(3), */
+#include <talloc.h>
+#include <sys/queue.h>
+#include <errno.h>
+#include <assert.h>
 
 #include "syscall/chain.h"
 #include "syscall/sysnum.h"
@@ -39,14 +39,6 @@ struct chained_syscall {
 
 STAILQ_HEAD(chained_syscalls, chained_syscall);
 
-/**
- * Append a new syscall (@sysnum, @sysarg_*) to the list of
- * "unrequested" syscalls for the given @tracee.  These new syscalls
- * will be triggered in order once the current syscall is done.  The
- * caller is free to force the last result of this syscall chain in
- * @tracee->chain.final_result.  This function returns -errno if an
- * error occurred, otherwise 0.
- */
 int register_chained_syscall(Tracee *tracee, Sysnum sysnum,
 			     word_t sysarg_1, word_t sysarg_2,
 			     word_t sysarg_3, word_t sysarg_4,
@@ -80,11 +72,6 @@ int register_chained_syscall(Tracee *tracee, Sysnum sysnum,
     return 0;
 }
 
-/**
- * Use/remove the first element of @tracee->chain.syscalls to forge a
- * new syscall.  This function should be called only at the end of in
- * the sysexit stage.
- */
 void chain_next_syscall(Tracee *tracee)
 {
     struct chained_syscall *syscall;
@@ -93,8 +80,6 @@ void chain_next_syscall(Tracee *tracee)
 
     assert(tracee->chain.syscalls != NULL);
 
-    /* No more chained syscalls: force the result of the initial
-     * syscall (the one explicitly requested by the tracee).  */
     if (STAILQ_EMPTY(tracee->chain.syscalls)) {
 	TALLOC_FREE(tracee->chain.syscalls);
 
@@ -107,11 +92,8 @@ void chain_next_syscall(Tracee *tracee)
 	return;
     }
 
-    /* Original register values will be restored right after the
-     * last chained syscall.  */
     tracee->restore_original_regs = false;
 
-    /* The list of chained syscalls is a FIFO.  */
     syscall = STAILQ_FIRST(tracee->chain.syscalls);
     STAILQ_REMOVE_HEAD(tracee->chain.syscalls, link);
 
@@ -125,26 +107,16 @@ void chain_next_syscall(Tracee *tracee)
     sysnum = detranslate_sysnum(get_abi(tracee), syscall->sysnum);
     poke_reg(tracee, SYSTRAP_NUM, sysnum);
 
-    /* Move the instruction pointer back to the original trap.  */
     instr_pointer = peek_reg(tracee, CURRENT, INSTR_POINTER);
     poke_reg(tracee, INSTR_POINTER, instr_pointer - SYSTRAP_SIZE);
 }
 
-/**
- * Force the last result of the @tracee's current syscall chain to be
- * @forced_result.
- */
 void force_chain_final_result(Tracee *tracee, word_t forced_result)
 {
     tracee->chain.force_final_result = true;
     tracee->chain.final_result = forced_result;
 }
 
-/**
- * Restart the original syscall of the given @tracee.  The result of
- * the current syscall will be overwritten.  This function returns the
- * same status as register_chained_syscall().
- */
 int restart_original_syscall(Tracee *tracee)
 {
     poke_reg(tracee, SYSARG_1, peek_reg(tracee, ORIGINAL, SYSARG_1));
@@ -155,7 +127,6 @@ int restart_original_syscall(Tracee *tracee)
     poke_reg(tracee, SYSARG_6, peek_reg(tracee, ORIGINAL, SYSARG_6));
     poke_reg(tracee, SYSTRAP_NUM, peek_reg(tracee, ORIGINAL, SYSARG_NUM));
 
-    /* Move the instruction pointer back to the original trap.  */
     poke_reg(tracee, INSTR_POINTER,
 	     peek_reg(tracee, CURRENT, INSTR_POINTER) - SYSTRAP_SIZE);
 

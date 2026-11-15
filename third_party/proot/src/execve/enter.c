@@ -20,17 +20,17 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include <sys/types.h>		/* lstat(2), lseek(2), */
-#include <sys/stat.h>		/* lstat(2), lseek(2), fchmod(2), */
-#include <unistd.h>		/* access(2), lstat(2), close(2), read(2), */
-#include <errno.h>		/* E*, */
-#include <assert.h>		/* assert(3), */
-#include <talloc.h>		/* talloc*, */
-#include <sys/mman.h>		/* PROT_*, */
-#include <string.h>		/* strlen(3), strcpy(3), */
-#include <stdlib.h>		/* getenv(3), */
-#include <stdio.h>		/* fwrite(3), */
-#include <assert.h>		/* assert(3), */
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <errno.h>
+#include <assert.h>
+#include <talloc.h>
+#include <sys/mman.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
 
 #include "execve/execve.h"
 #include "execve/shebang.h"
@@ -48,11 +48,6 @@
 
 #define P(a) PROGRAM_FIELD(load_info->elf_header, *program_header, a)
 
-/**
- * Add @program_header (type PT_LOAD) to @load_info->mappings.  This
- * function returns -errno if an error occured, otherwise it returns
- * 0.
- */
 static int
 add_mapping(const Tracee *tracee UNUSED, LoadInfo *load_info,
 	    const ProgramHeader *program_header)
@@ -83,7 +78,7 @@ add_mapping(const Tracee *tracee UNUSED, LoadInfo *load_info,
     start_address = P(vaddr) & page_mask;
     end_address = (P(vaddr) + P(filesz) + page_size) & page_mask;
 
-    load_info->mappings[index].fd = -1;	/* Unknown yet.  */
+    load_info->mappings[index].fd = -1;
     load_info->mappings[index].offset = P(offset) & page_mask;
     load_info->mappings[index].addr = start_address;
     load_info->mappings[index].length = end_address - start_address;
@@ -93,17 +88,10 @@ add_mapping(const Tracee *tracee UNUSED, LoadInfo *load_info,
 				       | (P(flags) & PF_X ? PROT_EXEC :
 					  0));
 
-    /*
-     * "If the segment's memory size p_memsz is larger than the file size
-     * p_filesz, the "extra" bytes are defined to hold the value 0 and to
-     * follow the segment's initialized area." -- man 7 elf.
-     */
     if (P(memsz) > P(filesz)) {
-	/* How many extra bytes in the current page?  */
 	load_info->mappings[index].clear_length =
 	    end_address - P(vaddr) - P(filesz);
 
-	/* Create new pages for the remaining extra bytes.  */
 	start_address = end_address;
 	end_address = (P(vaddr) + P(memsz) + page_size) & page_mask;
 	if (end_address > start_address) {
@@ -114,7 +102,7 @@ add_mapping(const Tracee *tracee UNUSED, LoadInfo *load_info,
 	    if (load_info->mappings == NULL)
 		return -ENOMEM;
 
-	    load_info->mappings[index].fd = -1;	/* Anonymous.  */
+	    load_info->mappings[index].fd = -1;
 	    load_info->mappings[index].offset = 0;
 	    load_info->mappings[index].addr = start_address;
 	    load_info->mappings[index].length =
@@ -131,11 +119,6 @@ add_mapping(const Tracee *tracee UNUSED, LoadInfo *load_info,
     return 0;
 }
 
-/**
- * Translate @user_path into @host_path and check if this latter exists, is
- * executable and is a regular file.  This function returns -errno if
- * an error occured, 0 otherwise.
- */
 int
 translate_and_check_exec(Tracee *tracee, char host_path[PATH_MAX],
 			 const char *user_path)
@@ -165,11 +148,6 @@ translate_and_check_exec(Tracee *tracee, char host_path[PATH_MAX],
     return 0;
 }
 
-/**
- * Add @program_header (type PT_INTERP) to @load_info->interp.  This
- * function returns -errno if an error occured, otherwise it returns
- * 0.
- */
 static int
 add_interp(Tracee *tracee, int fd, LoadInfo *load_info,
 	   const ProgramHeader *program_header)
@@ -178,7 +156,6 @@ add_interp(Tracee *tracee, int fd, LoadInfo *load_info,
     char *user_path;
     int status;
 
-    /* Only one PT_INTERP segment is allowed.  */
     if (load_info->interp != NULL)
 	return -EINVAL;
 
@@ -190,28 +167,14 @@ add_interp(Tracee *tracee, int fd, LoadInfo *load_info,
     if (user_path == NULL)
 	return -ENOMEM;
 
-    /*
-     * Remember pread(2) doesn't change the current position in the file.
-     */
     status = pread(fd, user_path, P(filesz), P(offset));
-    if ((size_t) status != P(filesz))	/* Unexpected size.  */
+    if ((size_t) status != P(filesz))
 	status = -EACCES;
     if (status < 0)
 	return status;
 
     user_path[P(filesz)] = '\0';
 
-    /*
-     * When a QEMU command was specified:
-     *
-     * - if it's a foreign binary we are reading the ELF interpreter of
-     * QEMU instead.
-     *
-     * - if it's a host binary, we are reading its ELF interpreter.
-     *
-     * In both case, it lies in "/host-rootfs" from a guest
-     * point-of-view.
-     */
     if (tracee->qemu != NULL && user_path[0] == '/') {
 	user_path =
 	    talloc_asprintf(tracee->ctx, "%s%s", HOST_ROOTFS, user_path);
@@ -244,12 +207,6 @@ struct add_load_info_data {
     int fd;
 };
 
-/**
- * This function is a program header iterator.  It invokes
- * add_mapping() or add_interp(), according to the type of
- * @program_header.  This function returns -errno if an error
- * occurred, otherwise 0.
- */
 static int
 add_load_info(const ElfHeader *elf_header,
 	      const ProgramHeader *program_header, void *data_)
@@ -286,10 +243,6 @@ add_load_info(const ElfHeader *elf_header,
     return 0;
 }
 
-/**
- * Extract the load info from @load->host_path.  This function returns
- * -errno if an error occured, otherwise it returns 0.
- */
 static int extract_load_info(Tracee *tracee, LoadInfo *load_info)
 {
     struct add_load_info_data data;
@@ -303,7 +256,6 @@ static int extract_load_info(Tracee *tracee, LoadInfo *load_info)
     if (fd < 0)
 	return fd;
 
-    /* Sanity check.  */
     switch (ELF_FIELD(load_info->elf_header, type)) {
     case ET_EXEC:
     case ET_DYN:
@@ -328,9 +280,6 @@ static int extract_load_info(Tracee *tracee, LoadInfo *load_info)
     return status;
 }
 
-/**
- * Add @load_base to each adresses of @load_info.
- */
 static void add_load_base(LoadInfo *load_info, word_t load_base)
 {
     size_t nb_mappings;
@@ -346,12 +295,6 @@ static void add_load_base(LoadInfo *load_info, word_t load_base)
 	load_info->elf_header.class32.e_entry += load_base;
 }
 
-/**
- * Compute the final load address for each position independant
- * objects of @tracee.
- *
- * TODO: support for ASLR.
- */
 static void compute_load_addresses(Tracee *tracee)
 {
     if (IS_POSITION_INDENPENDANT(tracee->load_info->elf_header)
@@ -364,7 +307,6 @@ static void compute_load_addresses(Tracee *tracee)
 	    add_load_base(tracee->load_info, EXEC_PIC_ADDRESS);
     }
 
-    /* Nothing more to do?  */
     if (tracee->load_info->interp == NULL)
 	return;
 
@@ -380,14 +322,6 @@ static void compute_load_addresses(Tracee *tracee)
     }
 }
 
-/**
- * Expand in argv[] and envp[] the runner for @user_path, if needed.
- * This function returns -errno if an error occurred, otherwise 0.  On
- * success, both @host_path and @user_path point to the program to
- * execute (respectively from host and guest point-of-views), and both
- * @tracee's argv[] (pointed to by SYSARG_2) @tracee's envp[] (pointed
- * to by SYSARG_3) are correctly updated.
- */
 static int
 expand_runner(Tracee *tracee, char host_path[PATH_MAX],
 	      char user_path[PATH_MAX])
@@ -396,23 +330,12 @@ expand_runner(Tracee *tracee, char host_path[PATH_MAX],
     char *argv0;
     int status;
 
-    /*
-     * Execution of host programs when QEMU is in use relies on LD_
-     * environment variables.
-     */
     status = fetch_array_of_xpointers(tracee, &envp, SYSARG_3, 0);
     if (status < 0)
 	return status;
 
-    /*
-     * Environment variables should be compared with the "name" part of
-     * the "name=value" string format.
-     */
     envp->compare_xpointee = (compare_xpointee_t) compare_xpointee_env;
 
-    /*
-     * No need to adjust argv[] if it's a host binary (a.k.a mixed-mode).
-     */
     if (tracee->mixed_mode || !is_host_elf(tracee, host_path)) {
 	ArrayOfXPointers *argv;
 	size_t nb_qemu_args;
@@ -425,21 +348,6 @@ expand_runner(Tracee *tracee, char host_path[PATH_MAX],
 	status = read_xpointee_as_string(argv, 0, &argv0);
 	if (status < 0)
 	    return status;
-
-	/*
-	 * Assuming PRoot was invoked this way:
-	 *
-	 * proot -q 'qemu-arm -cpu cortex-a9' ...
-	 *
-	 * a call to:
-	 *
-	 * execve("/bin/true", { "true", NULL }, ...)
-	 *
-	 * becomes:
-	 *
-	 * execve("/usr/bin/qemu", { "qemu", "-cpu", "cortex-a9",
-	 * "-0", "true", "/bin/true", NULL }, ...)
-	 */
 
 	nb_qemu_args = talloc_array_length(tracee->qemu) - 1;
 	status = resize_array_of_xpointers(argv, 1, nb_qemu_args + 2);
@@ -456,9 +364,6 @@ expand_runner(Tracee *tracee, char host_path[PATH_MAX],
 	if (status < 0)
 	    return status;
 
-	/*
-	 * Ensure LD_ features should not be applied to QEMU iteself.
-	 */
 	status = ldso_env_passthru(tracee, envp, argv, "-E", "-U", i);
 	if (status < 0)
 	    return status;
@@ -467,9 +372,6 @@ expand_runner(Tracee *tracee, char host_path[PATH_MAX],
 	if (status < 0)
 	    return status;
 
-	/*
-	 * Launch the runner in lieu of the initial program.
-	 */
 	assert(strlen(tracee->qemu[0]) + strlen(HOST_ROOTFS) < PATH_MAX);
 	assert(tracee->qemu[0][0] == '/');
 
@@ -479,11 +381,6 @@ expand_runner(Tracee *tracee, char host_path[PATH_MAX],
 	strcat(user_path, host_path);
     }
 
-    /*
-     * Provide information to the host dynamic linker to find host
-     * libraries (remember the guest root file-system contains libraries
-     * for the guest architecture only).
-     */
     status = rebuild_host_ldso_paths(tracee, host_path, envp);
     if (status < 0)
 	return status;
@@ -501,11 +398,6 @@ extern unsigned char _binary_loader_elf_end[];
 extern unsigned char WEAK _binary_loader_m32_elf_start[];
 extern unsigned char WEAK _binary_loader_m32_elf_end[];
 
-/**
- * Extract the built-in loader.  This function returns NULL if an
- * error occurred, otherwise it returns the path to the extracted
- * loader.  Note: @tracee is only used for notification purpose.
- */
 static char *extract_loader(const Tracee *tracee, bool wants_32bit_version)
 {
     char path[PATH_MAX];
@@ -525,13 +417,11 @@ static char *extract_loader(const Tracee *tracee, bool wants_32bit_version)
 
     if (wants_32bit_version) {
 	start = (void *) _binary_loader_m32_elf_start;
-	/* NOSONAR S5658: _start/_end are adjacent linker symbols in the same section */
 	size =
 	    (size_t) (_binary_loader_m32_elf_end -
 		      _binary_loader_m32_elf_start);
     } else {
 	start = (void *) _binary_loader_elf_start;
-	/* NOSONAR S5658: _start/_end are adjacent linker symbols in the same section */
 	size =
 	    (size_t) (_binary_loader_elf_end - _binary_loader_elf_start);
     }
@@ -542,7 +432,7 @@ static char *extract_loader(const Tracee *tracee, bool wants_32bit_version)
 	goto end;
     }
 
-    status = fchmod(fd, S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);	/* NOSONAR: world r-x required; loader must be executable by traced processes running as any uid */
+    status = fchmod(fd, S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
     if (status < 0) {
 	note(tracee, ERROR, SYSTEM,
 	     "can't change loader permissions (u+rx)");
@@ -587,10 +477,6 @@ static char *extract_loader(const Tracee *tracee, bool wants_32bit_version)
     return loader_path;
 }
 
-/**
- * Get the path to the loader for the given @tracee.  This function
- * returns NULL if an error occurred.
- */
 static inline const char *get_loader_path(const Tracee *tracee)
 {
     static char *loader_path = NULL;
@@ -613,11 +499,6 @@ static inline const char *get_loader_path(const Tracee *tracee)
     }
 }
 
-/**
- * Extract all the information that will be required by
- * translate_load_*().  This function returns -errno if an error
- * occured, otherwise 0.
- */
 int translate_execve_enter(Tracee *tracee)
 {
     char user_path[PATH_MAX];
@@ -628,13 +509,8 @@ int translate_execve_enter(Tracee *tracee)
     int status;
 
     if (IS_NOTIFICATION_PTRACED_LOAD_DONE(tracee)) {
-	/* Syscalls can now be reported to its ptracer.  */
 	tracee->as_ptracee.ignore_loader_syscalls = false;
 
-	/*
-	 * Cancel this spurious execve, it was only used as a
-	 * notification.
-	 */
 	set_sysnum(tracee, PR_void);
 	return 0;
     }
@@ -643,35 +519,17 @@ int translate_execve_enter(Tracee *tracee)
     if (status < 0)
 	return status;
 
-    /*
-     * Remember the user path before it is overwritten by
-     * expand_shebang().  This "raw" path is useful to fix the value of
-     * AT_EXECFN and /proc/{@tracee->pid}/comm.
-     */
     raw_path = talloc_strdup(tracee->ctx, user_path);
     if (raw_path == NULL)
 	return -ENOMEM;
 
     status = expand_shebang(tracee, host_path, user_path);
     if (status < 0)
-	/*
-	 * The Linux kernel actually returns -EACCES when trying to
-	 * execute a directory.
-	 */
 	return status == -EISDIR ? -EACCES : status;
 
-    /*
-     * user_path is modified only if there's an interpreter (ie. for a
-     * script or with qemu).
-     */
     if (status == 0 && tracee->qemu == NULL)
 	TALLOC_FREE(raw_path);
 
-    /*
-     * Remember the new value for "/proc/self/exe".  It points to a
-     * canonicalized guest path, hence detranslate_path() instead of
-     * using user_path directly.
-     */
     strcpy(new_exe, host_path);
     status = detranslate_path(tracee, new_exe, NULL);
     if (status >= 0) {
@@ -721,16 +579,12 @@ int translate_execve_enter(Tracee *tracee)
 	if (status < 0)
 	    return status;
 
-	/*
-	 * An ELF interpreter is supposed to be standalone.
-	 */
 	if (tracee->load_info->interp->interp != NULL)
 	    return -EINVAL;
     }
 
     compute_load_addresses(tracee);
 
-    /* Execute the loader instead of the program.  */
     loader_path = get_loader_path(tracee);
     if (loader_path == NULL)
 	return -ENOENT;
@@ -739,7 +593,6 @@ int translate_execve_enter(Tracee *tracee)
     if (status < 0)
 	return status;
 
-    /* Mask to its ptracer syscalls performed by the loader.  */
     tracee->as_ptracee.ignore_loader_syscalls = true;
 
     return 0;

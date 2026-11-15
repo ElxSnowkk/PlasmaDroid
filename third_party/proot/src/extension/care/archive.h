@@ -33,7 +33,6 @@ typedef struct {
     struct archive *handle;
     struct archive_entry_linkresolver *hardlink_resolver;
 
-    /* Information used to create an self-extracting archive.  */
     off_t offset;
     int fd;
 } Archive;
@@ -45,4 +44,4 @@ extern int archive(const Tracee * tracee, Archive * archive,
 		   const char *path, const char *alternate_path,
 		   const struct stat *statl);
 
-#endif				/* ARCHIVE_H */
+#endif

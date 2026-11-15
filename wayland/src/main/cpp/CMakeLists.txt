@@ -5,20 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 
-# C15-08: Removed explicit add_link_options("-Wl,-z,max-page-size=16384") here.
-# The Gradle externalNativeBuild passes -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON which
-# causes the NDK toolchain to apply -Wl,-z,max-page-size=16384 (and additionally sets
-# section alignment and bionic page-size macros). Using both would be redundant;
-# the Gradle flag is the canonical NDK mechanism for flexible-page-size support.
-# C15-A1: ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON controls more than just the linker flag —
-# it also controls __BIONIC_DEPRECATED_PAGE_SIZE_MACRO and section alignment. The
-# add_link_options approach was only a subset of the required changes.
-
-# ---------------------------------------------------------------------
-# libwayland-server, cross-built for Android NDK
-# ---------------------------------------------------------------------
-# Built once via meson cross-file (see scripts/build-libwayland-android.sh)
-# and shipped as a prebuilt .so in cpp/prebuilts/<abi>/.
 set(WAYLAND_PREBUILT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/prebuilts/${ANDROID_ABI})
 set(WAYLAND_PREBUILT_LIBDIR ${WAYLAND_PREBUILT_DIR}/lib)
 set(WAYLAND_PREBUILT_INCDIR ${WAYLAND_PREBUILT_DIR}/include)
@@ -34,9 +20,6 @@ if(NOT EXISTS ${WAYLAND_PREBUILT_LIBDIR}/libxkbcommon.so)
         "libxkbcommon.so not found at ${WAYLAND_PREBUILT_LIBDIR}.")
 endif()
 
-# C15-01: Use IMPORTED targets instead of bare link_directories().
-# IMPORTED targets carry their location and include dirs as usage requirements,
-# which are transitive and compatible with target_link_libraries(PRIVATE/PUBLIC).
 add_library(wayland-server SHARED IMPORTED)
 set_target_properties(wayland-server PROPERTIES
     IMPORTED_LOCATION ${WAYLAND_PREBUILT_LIBDIR}/libwayland-server.so)
@@ -47,22 +30,8 @@ set_target_properties(xkbcommon PROPERTIES
     IMPORTED_LOCATION ${WAYLAND_PREBUILT_LIBDIR}/libxkbcommon.so)
 target_include_directories(xkbcommon INTERFACE ${WAYLAND_PREBUILT_INCDIR})
 
-# C15-09: Removed PREBUILT_WAYLAND and PREBUILT_XKBCOMMON variables — unused after
-# switching to IMPORTED targets above.
-# C15-10: Removed duplicate WAYLAND_PREBUILT_INCDIR assignment (was set twice to
-# the same value; the first assignment above is canonical).
-
-# ---------------------------------------------------------------------
-# Wayland protocol XML -> C headers (wayland-scanner runs on host)
-# ---------------------------------------------------------------------
-# scripts/gen-wayland-protocols.sh emits to cpp/protocols/.
-# Headers + glue are committed to git.
 set(PROTOCOL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/protocols)
 
-# C15-11: Note — two orphaned protocol files exist in protocols/ but are NOT in this list:
-#   - linux-drm-syncobj-protocol.c: unversioned; superseded by linux-drm-syncobj-v1-protocol.c
-#   - xdg-activation-v1-protocol.c: v1-named; the non-v1 xdg-activation-protocol.c is used
-# These files are not compiled and can be removed in a future cleanup.
 set(PROTOCOL_SOURCES)
     foreach(proto
         xdg-shell
@@ -96,9 +65,6 @@ set(PROTOCOL_SOURCES)
     endif()
 endforeach()
 
-# ---------------------------------------------------------------------
-# Optional Vulkan client-scene backend (one Android WSI swapchain per toplevel)
-# ---------------------------------------------------------------------
 option(PLASMA_WAYLAND_REQUIRE_VULKAN "Fail the Android build instead of silently shipping a GLES-only Wayland backend" ON)
 set(PLASMA_WAYLAND_HAS_VULKAN 0)
 set(PLASMA_WAYLAND_SHADER_HINTS)
@@ -170,13 +136,6 @@ else()
     endif()
 endif()
 
-# ---------------------------------------------------------------------
-# PlasmaDroid integration bridge (headless start, embedded Surface, input)
-# ---------------------------------------------------------------------
-# The compositor is started headless from the terminal session so Linux
-# clients can connect before the first output window is created. The UI then
-# attaches an Android Surface when the first xdg_toplevel appears.
-
 add_library(piperella_compositor SHARED
     labwc.cpp
     plasma_wayland_bridge.cpp
@@ -229,9 +188,6 @@ target_compile_definitions(piperella_compositor PRIVATE
 target_compile_options(piperella_compositor PRIVATE
     -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
 
-# C15-05: Added PRIVATE scope keyword — link deps are implementation details not
-# exposed in any public header, so PRIVATE is correct.
-# C15-01: wayland-server and xkbcommon are now IMPORTED targets (defined above).
 find_library(PLASMA_WAYLAND_VULKAN_LIB vulkan)
 if(PLASMA_WAYLAND_HAS_VULKAN AND NOT PLASMA_WAYLAND_VULKAN_LIB)
     message(FATAL_ERROR "Wayland Vulkan is enabled but Android NDK libvulkan.so was not found")
@@ -247,15 +203,10 @@ if(PLASMA_WAYLAND_HAS_VULKAN)
     target_link_libraries(piperella_compositor PRIVATE ${PLASMA_WAYLAND_VULKAN_LIB})
 endif()
 
-# C15-02: Added CXX_VISIBILITY_PRESET hidden so all C++ symbols default to
-# hidden visibility. Only JNIEXPORT-annotated symbols and explicitly-exported
-# symbols will appear in the .so's .dynsym, reducing binary size and preventing
-# symbol clashes with other .so libs loaded in the same process.
 set_target_properties(piperella_compositor PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
     CXX_VISIBILITY_PRESET hidden)
 
-# ARM64 only: PlasmaDroid's PRoot/HAL integration and Mali target are AArch64.
 if(NOT ANDROID_ABI STREQUAL "arm64-v8a")
     message(FATAL_ERROR "PlasmaDroid Wayland server currently supports arm64-v8a only (got ${ANDROID_ABI})")
 endif()

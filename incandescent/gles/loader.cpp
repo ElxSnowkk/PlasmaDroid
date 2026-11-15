@@ -8,52 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-
-
-// Anel das últimas entradas GL desta thread (preenchido por LOG() quando INC_GL_ERRORS=1; ver gl/log.h).
-
-
-
-
-
-
-
-
-
-// Whether ANGLE was actually the library that got loaded. load_libs() falls back
-// to the system driver when ANGLE cannot be opened, which is the right thing for
-// a game -- rendering on the system driver beats not rendering -- but anything
-// that reports on the environment has to be able to tell the two apart.
-
-// The same fact, callable through dlsym. The plugin app's info query loads this
-// library and needs to report which driver answered; the bool above is not
-// exported (the build hides everything not marked), and a function survives
-// symbol-visibility policy changes better than a data export would.
-
-// ANGLE ships with the launcher, not with us. Inside the game's process it is
-// simply on the search path; a tool that loads this library on its own (the
-// plugin app's benchmark) has to say where the launcher keeps it, or it would
-// silently measure the system driver instead of the one the game will use.
-//
-// INC_ANGLE_DIR has three states, and the empty one is not the same as absent:
-//
-//   unset  -- nobody is managing this. Look ANGLE up by soname, which is how it
-//             resolves inside the launcher's own process.
-//   empty  -- explicitly do not use ANGLE. A caller that loads us on purpose
-//             says this when it has not been given permission to borrow ANGLE
-//             from anywhere. It cannot just leave the variable unset: once some
-//             earlier run has dlopen'd ANGLE by absolute path, that image is
-//             registered under its soname for the life of the process, and a
-//             plain dlopen("libGLESv2_angle.so") would quietly hand it back.
-//   a path -- take ANGLE from this directory.
-//
-// Returns nullptr for "do not use ANGLE"; otherwise fills `storage` and returns
-// a pointer into it.
-
 #include <cstring>
 #include <cstdio>
 #include <limits.h>

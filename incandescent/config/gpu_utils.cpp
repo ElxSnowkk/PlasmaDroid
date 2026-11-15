@@ -8,11 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-// open_lib() below hands these to dlopen() verbatim, unlike the loader in gles/loader.cpp which appends a
-// platform extension itself. Without the ".so" every dlopen here fails, getGPUInfo() returns an empty string
-// and hasVulkan12() returns 0 on every device.
-
 #include "gpu_utils.h"
 #include "../gles/loader.h"
 #if !defined(__APPLE__)

@@ -20,17 +20,17 @@
  * 02110-1301 USA.
  */
 
-#include <assert.h>		/* assert(3), */
-#include <stdint.h>		/* intptr_t, */
-#include <errno.h>		/* E*, */
-#include <sys/stat.h>		/* chmod(2), stat(2) */
-#include <sys/types.h>		/* uid_t, gid_t, get*id(2), */
-#include <unistd.h>		/* get*id(2),  */
-#include <sys/ptrace.h>		/* linux.git:c0a3a20b  */
-#include <linux/audit.h>	/* AUDIT_ARCH_*,  */
-#include <string.h>		/* memcpy(3), */
-#include <stdlib.h>		/* strtol(3), */
-#include <linux/auxvec.h>	/* AT_,  */
+#include <assert.h>
+#include <stdint.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/ptrace.h>
+#include <linux/audit.h>
+#include <string.h>
+#include <stdlib.h>
+#include <linux/auxvec.h>
 
 #include "extension/extension.h"
 #include "syscall/syscall.h"
@@ -61,7 +61,6 @@ typedef struct {
     mode_t mode;
 } ModifiedNode;
 
-/* List of syscalls handled by this extensions.  */
 static FilteredSysnum filtered_sysnums[] = {
     { PR_capset, FILTER_SYSEXIT },
     { PR_chmod, FILTER_SYSEXIT },
@@ -132,23 +131,12 @@ static FilteredSysnum filtered_sysnums[] = {
     FILTERED_SYSNUM_END,
 };
 
-/**
- * Restore the @node->mode for the given @node->path.
- *
- * Note: this is a Talloc destructor.
- */
 static int restore_mode(ModifiedNode *node)
 {
     (void) chmod(node->path, node->mode);
     return 0;
 }
 
-/**
- * Force permissions of @path to "rwx" during the path translation of
- * current @tracee's syscall, in order to simulate CAP_DAC_OVERRIDE.
- * The original permissions are restored through talloc destructors.
- * See canonicalize() for the meaning of @is_final.
- */
 static void override_permissions(const Tracee *tracee, const char *path,
 				 bool is_final)
 {
@@ -157,22 +145,17 @@ static void override_permissions(const Tracee *tracee, const char *path,
     mode_t new_mode;
     int status;
 
-    /* Get the meta-data */
     status = stat(path, &perms);
     if (status < 0)
 	return;
 
-    /* Copy the current permissions */
     new_mode = perms.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO);
 
-    /* Add read and write permissions to everything.  */
     new_mode |= (S_IRUSR | S_IWUSR);
 
-    /* Always add 'x' bit to directories */
     if (S_ISDIR(perms.st_mode))
 	new_mode |= S_IXUSR;
 
-    /* Patch the permissions only if needed.  */
     if (new_mode == (perms.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO)))
 	return;
 
@@ -181,11 +164,9 @@ static void override_permissions(const Tracee *tracee, const char *path,
 	return;
 
     if (!is_final) {
-	/* Restore the previous mode of any non final components.  */
 	node->mode = perms.st_mode;
     } else {
 	switch (get_sysnum(tracee, ORIGINAL)) {
-	    /* For chmod syscalls: restore the new mode of the final component.  */
 	case PR_chmod:
 	    node->mode = peek_reg(tracee, ORIGINAL, SYSARG_2);
 	    break;
@@ -194,7 +175,6 @@ static void override_permissions(const Tracee *tracee, const char *path,
 	    node->mode = peek_reg(tracee, ORIGINAL, SYSARG_3);
 	    break;
 
-	    /* For stat syscalls: don't touch the mode of the final component.  */
 	case PR_fstatat64:
 	case PR_lstat:
 	case PR_lstat64:
@@ -208,7 +188,6 @@ static void override_permissions(const Tracee *tracee, const char *path,
 	case PR_statfs64:
 	    return;
 
-	    /* Otherwise: restore the previous mode of the final component.  */
 	default:
 	    node->mode = perms.st_mode;
 	    break;
@@ -217,29 +196,17 @@ static void override_permissions(const Tracee *tracee, const char *path,
 
     node->path = talloc_strdup(node, path);
     if (node->path == NULL) {
-	/* Keep only consistent nodes.  */
 	TALLOC_FREE(node);
 	return;
     }
 
-    /* The mode restoration works because Talloc destructors are
-     * called in reverse order.  */
     talloc_set_destructor(node, restore_mode);
 
-    /* @path was already canonicalized and stat'd above under the
-     * tracee's translated view; this mirrors the path-based access
-     * pattern used throughout proot's path translation layer and isn't
-     * independently exploitable here. */
-    /* codeql[cpp/toctou-race-condition] */
-    (void) chmod(path, new_mode);	/* NOSONAR: see comment above */
+    (void) chmod(path, new_mode);
 
     return;
 }
 
-/**
- * Adjust current @tracee's syscall parameters according to @config.
- * This function always returns 0.
- */
 static int handle_sysenter_end(Tracee *tracee, const Config *config)
 {
     word_t sysnum;
@@ -262,7 +229,6 @@ static int handle_sysenter_end(Tracee *tracee, const Config *config)
     case PR_setfsuid32:
     case PR_setfsgid:
     case PR_setfsgid32:
-	/* These syscalls are fully emulated.  */
 	set_sysnum(tracee, PR_void);
 	return 0;
 
@@ -289,8 +255,6 @@ static int handle_sysenter_end(Tracee *tracee, const Config *config)
 	    uid = peek_reg(tracee, ORIGINAL, uid_sysarg);
 	    gid = peek_reg(tracee, ORIGINAL, gid_sysarg);
 
-	    /* Swap actual and emulated ids to get a chance of
-	     * success.  */
 	    if (uid == config->ruid)
 		poke_reg(tracee, uid_sysarg, getuid());
 	    if (gid == config->rgid)
@@ -303,55 +267,41 @@ static int handle_sysenter_end(Tracee *tracee, const Config *config)
     case PR_setgroups32:
     case PR_getgroups:
     case PR_getgroups32:
-	/* TODO */
 
     default:
 	return 0;
     }
 
-    /* Never reached  */
     assert(0);
     return 0;
 
 }
 
-/**
- * Copy config->@field to the tracee's memory location pointed to by @sysarg.
- */
 #define POKE_MEM_ID(sysarg, field) do {					\
 	poke_uint32(tracee, peek_reg(tracee, ORIGINAL, sysarg), config->field);	\
 	if (errno != 0)							\
 		return -errno;						\
 } while (0)
 
-/**
- * Emulate setuid(2) and setgid(2).
- */
 #define SETXID(id) do {							\
 	id ## _t id = peek_reg(tracee, ORIGINAL, SYSARG_1);		\
 	bool allowed;							\
 									\
-	/* "EPERM: The user is not privileged (does not have the	\
-	 * CAP_SETUID capability) and uid does not match the real UID	\
-	 * or saved set-user-ID of the calling process." -- man		\
-	 * setuid */							\
-	allowed = (config->euid == 0 /* TODO: || HAS_CAP(SETUID) */	\
+								\
+	allowed = (config->euid == 0 	\
 		|| id == config->r ## id				\
 		|| id == config->e ## id				\
 		|| id == config->s ## id);				\
 	if (!allowed)							\
 		return -EPERM;						\
 									\
-	/* "If the effective UID of the caller is root, the real UID	\
-	 * and saved set-user-ID are also set." -- man setuid */	\
+		\
 	if (config->e ## id == 0) {					\
 		config->r ## id = id;					\
 		config->s ## id = id;					\
 	}								\
 									\
-	/* "whenever the effective user ID is changed, fsuid will also	\
-	 * be changed to the new value of the effective user ID."  --	\
-	 * man setfsuid */						\
+							\
 	config->e ## id  = id;						\
 	config->fs ## id = id;						\
 									\
@@ -359,43 +309,17 @@ static int handle_sysenter_end(Tracee *tracee, const Config *config)
 	return 0;							\
 } while (0)
 
-/**
- * Check whether @id is set or not.
- */
 #define UNSET_ID(id) (id == (uid_t) -1)
 
-/**
- * Check whether @id is change or not.
- */
 #define UNCHANGED_ID(id) (UNSET_ID(id) || id == config->id)
 
-/**
- * Emulate setreuid(2) and setregid(2).
- */
 #define SETREXID(id) do {						\
 	id ## _t r ## id = peek_reg(tracee, ORIGINAL, SYSARG_1);	\
 	id ## _t e ## id = peek_reg(tracee, ORIGINAL, SYSARG_2);	\
 	bool allowed;							\
 									\
-	/* "Unprivileged processes may only set the effective user ID	\
-	 * to the real user ID, the effective user ID, or the saved	\
-	 * set-user-ID.							\
-	 *								\
-	 * Unprivileged users may only set the real user ID to the	\
-	 * real user ID or the effective user ID."			\
-	 *
-	 * "EPERM: The calling process is not privileged (does not	\
-	 * have the CAP_SETUID) and a change other than:		\
-	 * 1. swapping the effective user ID with the real user ID,	\
-	 *    or;							\
-	 * 2. setting one to the value of the other, or ;		\
-	 * 3. setting the effective user ID to the value of the saved	\
-	 *    set-user-ID						\
-	 * was specified." -- man setreuid				\
-	 *								\
-	 * Is it possible to "ruid <- euid" and "euid <- suid" at the	\
-	 * same time?  */						\
-	allowed = (config->euid == 0 /* TODO: || HAS_CAP(SETUID) */	\
+							\
+	allowed = (config->euid == 0 	\
 		|| (UNCHANGED_ID(e ## id) && UNCHANGED_ID(r ## id))	\
 		|| (r ## id == config->e ## id && (e ## id == config->r ## id || UNCHANGED_ID(e ## id))) \
 		|| (e ## id == config->r ## id && (r ## id == config->e ## id || UNCHANGED_ID(r ## id))) \
@@ -403,12 +327,7 @@ static int handle_sysenter_end(Tracee *tracee, const Config *config)
 	if (!allowed)							\
 		return -EPERM;						\
 									\
-	/* "Supplying a value of -1 for either the real or effective	\
-	 * user ID forces the system to leave that ID unchanged.	\
-	 * [...]  If the real user ID is set or the effective user ID	\
-	 * is set to a value not equal to the previous real user ID,	\
-	 * the saved set-user-ID will be set to the new effective user	\
-	 * ID." -- man setreuid */					\
+						\
 	if (!UNSET_ID(e ## id)) {					\
 		if (e ## id != config->r ## id)				\
 			config->s ## id = e ## id;			\
@@ -417,8 +336,7 @@ static int handle_sysenter_end(Tracee *tracee, const Config *config)
 		config->fs ## id = e ## id;				\
 	}								\
 									\
-	/* Since it changes the current ruid value, this has to be	\
-	 * done after euid handling. */					\
+						\
 	if (!UNSET_ID(r ## id)) {					\
 		if (!UNSET_ID(e ## id))					\
 			config->s ## id = e ## id;			\
@@ -429,46 +347,30 @@ static int handle_sysenter_end(Tracee *tracee, const Config *config)
 	return 0;							\
 } while (0)
 
-/**
- * Check if @var is equal to any config->r{@type}id's.
- */
 #define EQUALS_ANY_ID(var, type)  (var == config->r ## type ## id \
 				|| var == config->e ## type ## id \
 				|| var == config->s ## type ## id)
 
-/**
- * Emulate setresuid(2) and setresgid(2).
- */
 #define SETRESXID(type) do {						\
 	type ## id_t r ## type ## id = peek_reg(tracee, ORIGINAL, SYSARG_1);	\
 	type ## id_t e ## type ## id = peek_reg(tracee, ORIGINAL, SYSARG_2);	\
 	type ## id_t s ## type ## id = peek_reg(tracee, ORIGINAL, SYSARG_3);	\
 	bool allowed;							\
 									\
-	/* "Unprivileged user processes may change the real UID,	\
-	 * effective UID, and saved set-user-ID, each to one of: the	\
-	 * current real UID, the current effective UID or the current	\
-	 * saved set-user-ID.						\
-	 *								\
-	 * Privileged processes (on Linux, those having the CAP_SETUID	\
-	 * capability) may set the real UID, effective UID, and saved	\
-	 * set-user-ID to arbitrary values." -- man setresuid */	\
-	allowed = (config->euid == 0 /* || HAS_CAP(SETUID) */		\
+		\
+	allowed = (config->euid == 0 		\
 		|| ((UNSET_ID(r ## type ## id) || EQUALS_ANY_ID(r ## type ## id, type)) \
 		 && (UNSET_ID(e ## type ## id) || EQUALS_ANY_ID(e ## type ## id, type)) \
 		 && (UNSET_ID(s ## type ## id) || EQUALS_ANY_ID(s ## type ## id, type)))); \
 	if (!allowed)							\
 		return -EPERM;						\
 									\
-	/* "If one of the arguments equals -1, the corresponding value	\
-	 * is not changed." -- man setresuid */				\
+					\
 	if (!UNSET_ID(r ## type ## id))					\
 		config->r ## type ## id = r ## type ## id;		\
 									\
 	if (!UNSET_ID(e ## type ## id)) {				\
-		/* "the file system UID is always set to the same	\
-		 * value as the (possibly new) effective UID." -- man	\
-		 * setresuid */						\
+								\
 		config->e ## type ## id  = e ## type ## id;		\
 		config->fs ## type ## id = e ## type ## id;		\
 	}								\
@@ -480,35 +382,23 @@ static int handle_sysenter_end(Tracee *tracee, const Config *config)
 	return 0;							\
 } while (0)
 
-/**
- * Emulate setfsuid(2) and setfsgid(2).
- */
 #define SETFSXID(type) do {						\
 	uid_t fs ## type ## id = peek_reg(tracee, ORIGINAL, SYSARG_1); 	\
 	uid_t old_fs ## type ## id = config->fs ## type ## id;		\
 	bool allowed;							\
 									\
-	/* "setfsuid() will succeed only if the caller is the		\
-	 * superuser or if fsuid matches either the real user ID,	\
-	 * effective user ID, saved set-user-ID, or the current value	\
-	 * of fsuid." -- man setfsuid */				\
-	allowed = (config->euid == 0 /* TODO: || HAS_CAP(SETUID) */	\
+					\
+	allowed = (config->euid == 0 	\
 		|| fs ## type ## id == config->fs ## type ## id		\
 		|| EQUALS_ANY_ID(fs ## type ## id, type));		\
 	if (allowed)							\
 		config->fs ## type ## id = fs ## type ## id;		\
 									\
-	/* "On success, the previous value of fsuid is returned.  On	\
-	 * error, the current value of fsuid is returned." -- man	\
-	 * setfsuid */							\
+								\
 	poke_reg(tracee, SYSARG_RESULT, old_fs ## type ## id);		\
 	return 0;							\
 } while (0)
 
-/**
- * Adjust current @tracee's syscall result according to @config.  This
- * function returns -errno if an error occured, otherwise 0.
- */
 static int handle_sysexit_end(Tracee *tracee, Config *config)
 {
     word_t sysnum;
@@ -605,14 +495,11 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
     case PR_fchownat:{
 	    word_t result;
 
-	    /* Override only permission errors.  */
 	    result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
 	    if ((int) result != -EPERM)
 		return 0;
 
-	    /* Force success if the tracee was supposed to have
-	     * the capability.  */
-	    if (config->euid == 0)	/* TODO: || HAS_CAP(...) */
+	    if (config->euid == 0)
 		poke_reg(tracee, SYSARG_RESULT, 0);
 
 	    return 0;
@@ -634,12 +521,10 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 	    off_t uid_offset;
 	    off_t gid_offset;
 
-	    /* Override only if it succeed.  */
 	    result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
 	    if (result != 0)
 		return 0;
 
-	    /* Get the address of the 'stat' structure.  */
 	    if (sysnum == PR_statx) {
 		sysarg = SYSARG_5;
 		uid_offset = OFFSETOF_STATX_UID;
@@ -655,21 +540,17 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 
 	    address = peek_reg(tracee, ORIGINAL, sysarg);
 
-	    /* Sanity checks.  */
 	    assert(__builtin_types_compatible_p(uid_t, uint32_t));
 	    assert(__builtin_types_compatible_p(gid_t, uint32_t));
 
-	    /* Get the uid & gid values from the 'stat' structure.  */
 	    uid = peek_uint32(tracee, address + uid_offset);
 	    if (errno != 0)
-		uid = 0;	/* Not fatal.  */
+		uid = 0;
 
 	    gid = peek_uint32(tracee, address + gid_offset);
 	    if (errno != 0)
-		gid = 0;	/* Not fatal.  */
+		gid = 0;
 
-	    /* Override only if the file is owned by the current user.
-	     * Errors are not fatal here.  */
 	    if (uid == getuid())
 		poke_uint32(tracee, address + uid_offset, config->suid);
 
@@ -685,10 +566,9 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 	    word_t input;
 	    int status;
 
-	    if (config->euid != 0)	/* TODO: && !HAS_CAP(SYS_CHROOT) */
+	    if (config->euid != 0)
 		return 0;
 
-	    /* Override only permission errors.  */
 	    result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
 	    if ((int) result != -EPERM)
 		return 0;
@@ -699,16 +579,13 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 	    if (status < 0)
 		return status;
 
-	    /* Resolve relative path segments. */
 	    if (!realpath(path, abspath))
 		return 0;
 
-	    /* Only "new rootfs == current rootfs" is supported yet.  */
 	    status = compare_paths(get_root(tracee), abspath);
 	    if (status != PATHS_ARE_EQUAL)
 		return 0;
 
-	    /* Force success.  */
 	    poke_reg(tracee, SYSARG_RESULT, 0);
 	    return 0;
 	}
@@ -727,11 +604,6 @@ static int handle_sysexit_end(Tracee *tracee, Config *config)
 #undef SETRESXID
 #undef SETFSXID
 
-/**
- * Adjust some ELF auxiliary vectors.  This function assumes the
- * "argv, envp, auxv" stuff is pointed to by @tracee's stack pointer,
- * as expected right after a successful call to execve(2).
- */
 static int adjust_elf_auxv(Tracee *tracee, Config *config)
 {
     ElfAuxVector *vectors;
@@ -774,10 +646,6 @@ static int adjust_elf_auxv(Tracee *tracee, Config *config)
     return 0;
 }
 
-/**
- * Handler for this @extension.  It is triggered each time an @event
- * occurred.  See ExtensionEvent for the meaning of @data1 and @data2.
- */
 int fake_id0_callback(Extension *extension, ExtensionEvent event,
 		      intptr_t data1, intptr_t data2)
 {
@@ -800,7 +668,6 @@ int fake_id0_callback(Extension *extension, ExtensionEvent event,
 		errno = 0;
 		gid = strtol(gid_string + 1, NULL, 10);
 	    }
-	    /* Fallback to the current gid if an error occured.  */
 	    if (errno != 0)
 		gid = getgid();
 
@@ -822,21 +689,10 @@ int fake_id0_callback(Extension *extension, ExtensionEvent event,
 	    return 0;
 	}
 
-    case INHERIT_PARENT:	/* Inheritable for sub reconfiguration ...  */
+    case INHERIT_PARENT:
 	return 1;
 
     case INHERIT_CHILD:{
-	    /* Copy the parent configuration to the child.  The
-	     * structure should not be shared as uid/gid changes
-	     * in one process should not affect other processes.
-	     * This assertion is not true for POSIX threads
-	     * sharing the same group, however Linux threads never
-	     * share uid/gid information.  As a consequence, the
-	     * GlibC emulates the POSIX behavior on Linux by
-	     * sending a signal to all group threads to cause them
-	     * to invoke the system call too.  Finally, PRoot
-	     * doesn't have to worry about clone flags.
-	     */
 
 	    Extension *parent = (Extension *) data1;
 	    extension->config = talloc_zero(extension, Config);
@@ -852,9 +708,7 @@ int fake_id0_callback(Extension *extension, ExtensionEvent event,
 	    Config *config = talloc_get_type_abort(extension->config,
 						   Config);
 
-	    /* Force permissions if the tracee was supposed to
-	     * have the capability.  */
-	    if (config->euid == 0)	/* TODO: || HAS_CAP(DAC_OVERRIDE) */
+	    if (config->euid == 0)
 		override_permissions(tracee, (char *) data1, (bool) data2);
 	    return 0;
 	}
@@ -887,13 +741,11 @@ int fake_id0_callback(Extension *extension, ExtensionEvent event,
 	    if ((int) result < 0 || sysnum != PR_execve)
 		return 0;
 
-	    /* This has to be done before PRoot pushes the load
-	     * script into tracee's stack.  */
 	    adjust_elf_auxv(tracee, config);
 
 	    status = stat(tracee->load_info->host_path, &mode);
 	    if (status < 0)
-		return 0;	/* Not fatal.  */
+		return 0;
 
 	    if ((mode.st_mode & S_ISUID) != 0) {
 		config->euid = 0;

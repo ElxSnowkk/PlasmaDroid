@@ -8,35 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-// Tracing for the EGL layer.
-//
-// The EGL wrappers are the seam between the host process, this layer's virtual
-// context records, and whichever GLES driver is behind them -- and nearly
-// everything that goes wrong at that seam is a sequencing problem. Which thread
-// made what current, which display is still held by whom, whether the handle the
-// driver just returned is one it handed out before. An argument dump per entry
-// point answers none of that, so every line here carries the calling thread and
-// says what came back, not just what went in.
-//
-//   adb logcat -s Incandescent:* | grep '\[EGL'
-//   adb logcat -s Incandescent:* | grep '\[EGL t12345\]'   # one thread's story
-//
-// This is deliberately LOG_I rather than LOG_D: it is meant to be readable from a
-// release build on a user's device, without GLOBAL_DEBUG turning the whole
-// renderer into a log firehose that drops the interesting lines. Set INC_EGL_TRACE
-// to 0 to compile all of it out.
-
-// A thread id, via the syscall rather than gettid(), which bionic only exposes as
-// a real symbol from API 30 and this library targets 21.
-// PlasmaDroid: linhas de diagnostico SEMPRE ligadas (poucas: criacao de display e eglInitialize). Saem no terminal do guest
-// (printf) e no logcat, com o prefixo [PlasmaGL].
-
-
-
-// Shorthand for the common shape: prefix, thread, then the message.
-
 #ifndef INCANDESCENT_EGL_TRACE_H
 #define INCANDESCENT_EGL_TRACE_H
 

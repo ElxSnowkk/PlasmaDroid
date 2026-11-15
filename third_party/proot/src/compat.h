@@ -23,7 +23,6 @@
 #ifndef COMPAT_H
 #define COMPAT_H
 
-/* Local definitions for compatibility with old and/or broken distros... */
 #ifndef AT_NULL
 #define AT_NULL			0
 #endif
@@ -265,24 +264,8 @@
 #define NT_ARM_SYSTEM_CALL		0x404
 #endif
 
-/* compat.h is also pulled in by the freestanding, -nostdlib loader
- * build (see src/GNUmakefile's build_loader), which has no libc
- * available at all -- <sys/user.h> may not even exist there (e.g. no
- * 32-bit multilib headers for the m32 loader). The register-transfer
- * structs below are only ever needed by hosted code that does ptrace
- * (tracee.h / ptrace.c); the loader never touches them. Skip this
- * whole block for freestanding translation units.  */
 #if !defined(__STDC_HOSTED__) || __STDC_HOSTED__
 
-/* Some older glibc (e.g. 2.17, as shipped by RHEL/CentOS 7's initial
- * aarch64 port) never added struct user_regs_struct as a source
- * compatibility alias for the kernel's struct user_pt_regs: the name
- * is forward-declared by <sys/user.h> but never given a member list,
- * so it stays an incomplete type and any use of it fails to compile
- * ("array type has incomplete element type", "incomplete type is not
- * allowed", ...).  Provide it ourselves here, laid out exactly like
- * the kernel ABI (arch/arm64/include/uapi/asm/ptrace.h), for the
- * glibc versions that need it.  */
 #include <sys/user.h>
 #if defined(__aarch64__) && defined(__GLIBC__)
 #if !__GLIBC_PREREQ(2, 24)
@@ -295,13 +278,6 @@ struct user_regs_struct {
 #endif
 #endif
 
-/* Unlike struct user_regs_struct above, glibc has never defined
- * struct user_fpregs_struct for aarch64 (confirmed missing as of
- * glibc 2.39): the kernel's FP/SIMD state has always only had a
- * name of its own, struct user_fpsimd_state.  Provide the x86-style
- * alias ourselves, laid out exactly like the kernel ABI (see
- * arch/arm64/include/uapi/asm/ptrace.h), so this doesn't depend on
- * a glibc version ever adding it.  */
 #if defined(__aarch64__)
 struct user_fpregs_struct {
     unsigned __int128 vregs[32];
@@ -311,6 +287,6 @@ struct user_fpregs_struct {
 };
 #endif
 
-#endif				/* !defined(__STDC_HOSTED__) || __STDC_HOSTED__ */
+#endif
 
-#endif				/* COMPAT_H */
+#endif

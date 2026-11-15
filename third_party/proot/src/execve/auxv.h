@@ -41,4 +41,4 @@ extern int push_elf_aux_vectors(const Tracee * tracee,
 extern bool fix_up_execfn(const Tracee * tracee, void *vectors,
 			  size_t size);
 
-#endif				/* AUXV */
+#endif

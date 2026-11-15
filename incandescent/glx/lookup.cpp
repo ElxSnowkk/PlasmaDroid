@@ -8,15 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-// The application can ask for a multi-draw entry point by name and call the
-// result directly, bypassing the dispatcher in gl/multidraw.cpp. Hand back the
-// symbol implementing whatever backend that entry point resolved to, so both
-// routes agree. The suffix table lives in config/settings.cpp for exactly that
-// reason.
-
 #include "lookup.h"
 
 #include "../config/settings.h"

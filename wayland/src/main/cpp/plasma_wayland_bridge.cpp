@@ -21,7 +21,7 @@
 namespace {
 std::mutex g_mutex;
 std::atomic<CompositorHandle*> g_handle{nullptr};
-ANativeWindow* g_output_window = nullptr; // owned by compositor after attach
+ANativeWindow* g_output_window = nullptr;
 
 class UtfString {
 public:
@@ -68,8 +68,6 @@ Java_org_plasma_wayland_NativeWaylandBridge_nativeStartHeadless(
     chmod(socket_dir.c_str(), 0700);
     configure_environment(socket_dir.c_str(), xkb_root.c_str());
 
-    // Remove only a stale socket path in this app-private runtime directory.
-    // There cannot be another live server here because g_handle is guarded.
     const std::string socket_path = std::string(socket_dir.c_str()) + "/wayland-0";
     unlink(socket_path.c_str());
 
@@ -111,7 +109,7 @@ Java_org_plasma_wayland_NativeWaylandBridge_nativeDetachSurface(
     std::lock_guard<std::mutex> guard(g_mutex);
     if (g_handle.load(std::memory_order_acquire) != handle || !g_output_window) return;
     compositor_on_window_destroyed(handle);
-    g_output_window = nullptr; // compositor released the ANativeWindow ref
+    g_output_window = nullptr;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -132,7 +130,7 @@ Java_org_plasma_wayland_NativeWaylandBridge_nativeAttachClientWindow(
     if (!window) return JNI_FALSE;
     const bool ok = compositor_attach_client_window(handle,
         static_cast<uint64_t>(window_id), window, width, height);
-    ANativeWindow_release(window); // compositor renderer holds its own ref
+    ANativeWindow_release(window);
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 

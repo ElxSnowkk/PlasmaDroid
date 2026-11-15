@@ -20,13 +20,6 @@
  * 02110-1301 USA.
  */
 
-/* According to the ARM64 EABI, all registers have undefined values at
- * program startup except:
- *
- * - the instruction pointer (pc)
- * - the stack pointer (sp)
- * - the rtld_fini pointer (x0)
- */
 #define BRANCH(stack_pointer, destination) do {			\
 	asm volatile (						\
 		"// Restore initial stack pointer.	\n\t"	\
@@ -37,7 +30,7 @@
 		"					\n\t"	\
 		"// Start the program.			\n\t"	\
 		"br %1				\n"		\
-		: /* no output */				\
+		: 				\
 		: "r" (stack_pointer), "r" (destination)	\
 		: "memory", "sp", "x0");			\
 	__builtin_unreachable();				\

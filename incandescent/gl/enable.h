@@ -8,24 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-// ---------------------------------------------------------------------------
-// The virtual enable state
-//
-// GL 4.6 has 28 enable capabilities; 13 of them do not exist in GLES 3.2 core.
-// Forwarding glEnable straight to the driver made those 13 fail with
-// GL_INVALID_ENUM, and left the five state queries contradicting each other:
-// glIsEnabled must return GL_FALSE on error, while glGetBooleanv and friends
-// leave their output untouched, so the same capability answered two different
-// things in the same frame -- and glGetError always reports GL_NO_ERROR, so the
-// application could not tell.
-//
-// Every enable capability now lives in one table. Queries read it, the enable
-// entry points write it, and whether the driver is also told is a per-capability
-// property rather than an accident of which enum the driver happens to know.
-// ---------------------------------------------------------------------------
-
 #ifndef INCANDESCENT_ENABLE_H
 #define INCANDESCENT_ENABLE_H
 

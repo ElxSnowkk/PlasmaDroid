@@ -8,55 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-// ---------------------------------------------------------------------------
-// Pixel-transfer formats GLES does not have
-//
-// Desktop GL accepts GL_BGRA / GL_BGR as *client* formats: the driver reorders
-// the data during the transfer and the texture stores ordinary RGBA. GLES has
-// no reversed client formats and none of the packed GL_UNSIGNED_INT_8_8_8_8*
-// types -- the pair Minecraft uploads every texture with.
-//
-// GL_EXT_texture_format_BGRA8888 is not a substitute. It makes BGRA an
-// *internalformat*, which forbids exactly the combination desktop applications
-// use (BGRA client data into a GL_RGBA8 texture), still has no packed types,
-// and what it may render to or mipmap differs per driver.
-//
-// So the reordering desktop GL does in the driver happens here on the CPU: the
-// client data is converted at the transfer boundary, honouring the full
-// unpack state including a bound unpack PBO, and GLES only ever sees formats
-// it has. This replaces the previous approach -- renaming the enum and
-// patching the damage with a texture swizzle -- which mends sampling only, and
-// only until the application mixes upload formats on one texture, renders
-// into it, or sets a swizzle of its own.
-// ---------------------------------------------------------------------------
-
-
-// Rewrites one upload's (format, type, pixels) into a form GLES accepts.
-//
-//   inc_upload_fix_t fix(width, height, depth, format, type, pixels);
-//   GLES.glTexSubImage2D(target, level, x, y, width, height,
-//                        fix.format, fix.type, fix.pixels);
-//
-// For combinations GLES understands it does nothing at all. When it converts,
-// the emitted stream is tightly packed, so the unpack parameters already
-// applied on the way in are zeroed for the driver call; the destructor
-// restores every piece of state it touched, including the unpack PBO binding.
-
-
-
-
-
-
-
-// The same predicate inc_upload_fix_t::has_data() answers, asked before the
-// conversion exists. internal_convert() in gl/texture.cpp has to know whether a
-// call carries bytes -- an allocation's `type` describes nothing, so nothing may
-// be derived from it -- but it runs first, because the conversion needs the
-// destination format it produces. Both go through here so the two can never
-// disagree about the same call.
-
 #ifndef INCANDESCENT_TRANSFER_H
 #define INCANDESCENT_TRANSFER_H
 

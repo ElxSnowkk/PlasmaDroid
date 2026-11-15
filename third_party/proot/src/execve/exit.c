@@ -20,15 +20,15 @@
  * 02110-1301 USA.
  */
 
-#include <linux/auxvec.h>	/* AT_*,  */
-#include <talloc.h>		/* talloc*, */
-#include <sys/mman.h>		/* MAP_*, */
-#include <assert.h>		/* assert(3), */
-#include <string.h>		/* strlen(3), strerror(3), */
-#include <strings.h>		/* bzero(3), */
-#include <signal.h>		/* kill(2), SIG*, */
-#include <unistd.h>		/* write(2), */
-#include <errno.h>		/* E*, */
+#include <linux/auxvec.h>
+#include <talloc.h>
+#include <sys/mman.h>
+#include <assert.h>
+#include <string.h>
+#include <strings.h>
+#include <signal.h>
+#include <unistd.h>
+#include <errno.h>
 
 #include "execve/execve.h"
 #include "execve/elf.h"
@@ -42,11 +42,6 @@
 #include "path/temp.h"
 #include "cli/note.h"
 
-
-/**
- * Fill @path with the content of @vectors, formatted according to
- * @ptracee's current ABI.
- */
 static int fill_file_with_auxv(const Tracee *ptracee, const char *path,
 			       const ElfAuxVector *vectors)
 {
@@ -82,10 +77,6 @@ static int fill_file_with_auxv(const Tracee *ptracee, const char *path,
     return status;
 }
 
-/**
- * Bind content of @vectors over /proc/{@ptracee->pid}/auxv.  This
- * function returns -1 if an error occurred, otherwise 0.
- */
 static int bind_proc_pid_auxv(const Tracee *ptracee)
 {
     word_t vectors_address;
@@ -104,14 +95,11 @@ static int bind_proc_pid_auxv(const Tracee *ptracee)
     if (vectors == NULL)
 	return -1;
 
-    /* Path to these ELF auxiliary vectors.  */
     guest_path =
 	talloc_asprintf(ptracee->ctx, "/proc/%d/auxv", ptracee->pid);
     if (guest_path == NULL)
 	return -1;
 
-    /* Remove binding to this path, if any.  It contains ELF
-     * auxiliary vectors of the previous execve(2).  */
     binding = get_binding(ptracee, GUEST, guest_path);
     if (binding != NULL
 	&& compare_paths(binding->guest.path,
@@ -128,24 +116,17 @@ static int bind_proc_pid_auxv(const Tracee *ptracee)
     if (status < 0)
 	return -1;
 
-    /* Note: this binding will be removed once ptracee gets freed.  */
     binding =
 	insort_binding3(ptracee, ptracee->life_context, host_path,
 			guest_path);
     if (binding == NULL)
 	return -1;
 
-    /* This temporary file (host_path) will be removed once the
-     * binding is freed.  */
     talloc_reparent(ptracee->ctx, binding, host_path);
 
     return 0;
 }
 
-/**
- * Convert @mappings into load @script statements at the given @cursor
- * position.  This function returns the new cursor position.
- */
 static void *transcript_mappings(void *cursor, const Mapping *mappings)
 {
     size_t nb_mappings;
@@ -172,10 +153,6 @@ static void *transcript_mappings(void *cursor, const Mapping *mappings)
     return cursor;
 }
 
-/**
- * Convert @tracee->load_info into a load script, then transfer this
- * latter into @tracee's memory.
- */
 static int transfer_load_script(Tracee *tracee)
 {
     const word_t stack_pointer = peek_reg(tracee, CURRENT, STACK_POINTER);
@@ -210,9 +187,6 @@ static int transfer_load_script(Tracee *tracee)
 	page_mask = ~(page_size - 1);
     }
 
-    /* The loader points AT_EXECFN to argv[0] on the stack (see
-     * loader/loader.c): remember where it is to answer PR_GET_AUXV
-     * and /proc/self/auxv the same way.  */
     tracee->execfn_addr =
 	peek_word(tracee, stack_pointer + sizeof_word(tracee));
     if (errno != 0)
@@ -223,11 +197,6 @@ static int transfer_load_script(Tracee *tracee)
 				  && tracee->load_info->interp->
 				  needs_executable_stack));
 
-    /* Strings addresses are required to generate the load script,
-     * for "open" actions.  Since I want to generate it in one
-     * pass, these strings will be put right below the current
-     * stack pointer -- the only known adresses so far -- in the
-     * "strings area".  */
     string1_size = strlen(tracee->load_info->user_path) + 1;
 
     string2_size = (tracee->load_info->interp == NULL ? 0
@@ -238,8 +207,6 @@ static int transfer_load_script(Tracee *tracee)
 	 tracee->load_info->user_path ? 0 : strlen(tracee->load_info->
 						   raw_path) + 1);
 
-    /* A padding will be appended at the end of the load script
-     * (a.k.a "strings area") to ensure this latter is aligned properly. */
     padding_size =
 	(stack_pointer - string1_size - string2_size - string3_size)
 	% STACK_ALIGNMENT;
@@ -253,7 +220,6 @@ static int transfer_load_script(Tracee *tracee)
 		       : stack_pointer - strings_size + string1_size +
 		       string2_size);
 
-    /* Compute the size of the load script.  */
     script_size = LOAD_STATEMENT_SIZE(*statement, open)
 	+ (LOAD_STATEMENT_SIZE(*statement, mmap)
 	   * talloc_array_length(tracee->load_info->mappings))
@@ -266,8 +232,6 @@ static int transfer_load_script(Tracee *tracee)
 	 LOAD_STATEMENT_SIZE(*statement, make_stack_exec) : 0)
 	+ LOAD_STATEMENT_SIZE(*statement, start);
 
-    /* Allocate enough room for both the load script and the
-     * strings area.  */
     buffer_size = script_size + strings_size;
     buffer = talloc_zero_size(tracee->ctx, buffer_size);
     if (buffer == NULL)
@@ -275,25 +239,21 @@ static int transfer_load_script(Tracee *tracee)
 
     cursor = buffer;
 
-    /* Load script statement: open.  */
     statement = cursor;
     statement->action = LOAD_ACTION_OPEN;
     statement->open.string_address = string1_address;
 
     cursor += LOAD_STATEMENT_SIZE(*statement, open);
 
-    /* Load script statements: mmap.  */
     cursor = transcript_mappings(cursor, tracee->load_info->mappings);
 
     if (tracee->load_info->interp != NULL) {
-	/* Load script statement: open.  */
 	statement = cursor;
 	statement->action = LOAD_ACTION_OPEN_NEXT;
 	statement->open.string_address = string2_address;
 
 	cursor += LOAD_STATEMENT_SIZE(*statement, open);
 
-	/* Load script statements: mmap.  */
 	cursor =
 	    transcript_mappings(cursor,
 				tracee->load_info->interp->mappings);
@@ -304,7 +264,6 @@ static int transfer_load_script(Tracee *tracee)
 	entry_point = ELF_FIELD(tracee->load_info->elf_header, entry);
 
     if (needs_executable_stack) {
-	/* Load script statement: stack_exec.  */
 	statement = cursor;
 
 	statement->action = LOAD_ACTION_MAKE_STACK_EXEC;
@@ -313,10 +272,8 @@ static int transfer_load_script(Tracee *tracee)
 	cursor += LOAD_STATEMENT_SIZE(*statement, make_stack_exec);
     }
 
-    /* Load script statement: start.  */
     statement = cursor;
 
-    /* Start of the program slightly differs when ptraced.  */
     if (tracee->as_ptracee.ptracer != NULL)
 	statement->action = LOAD_ACTION_START_TRACED;
     else
@@ -337,17 +294,14 @@ static int transfer_load_script(Tracee *tracee)
 
     cursor += LOAD_STATEMENT_SIZE(*statement, start);
 
-    /* Sanity check.  */
     assert((uintptr_t) cursor - (uintptr_t) buffer == script_size);
 
-    /* Convert the load script to the expected format.  */
     if (is_32on64_mode(tracee)) {
 	int i;
 	for (i = 0; buffer + i * sizeof(uint64_t) < cursor; i++)
 	    ((uint32_t *) buffer)[i] = ((uint64_t *) buffer)[i];
     }
 
-    /* Concatenate the load script and the strings.  */
     memcpy(cursor, tracee->load_info->user_path, string1_size);
     cursor += string1_size;
 
@@ -361,86 +315,33 @@ static int transfer_load_script(Tracee *tracee)
 	cursor += string3_size;
     }
 
-    /* Sanity check.  */
     cursor += padding_size;
     assert((uintptr_t) cursor - (uintptr_t) buffer == buffer_size);
 
-    /* Allocate enough room in tracee's memory for the load
-     * script, and make the first user argument points to this
-     * location.  Note that it is safe to update the stack pointer
-     * manually since we are in execve sysexit.  However it should
-     * be done before transfering data since the kernel might not
-     * allow page faults below the stack pointer.  */
     poke_reg(tracee, STACK_POINTER, stack_pointer - buffer_size);
     poke_reg(tracee, USERARG_1, stack_pointer - buffer_size);
 
-    /* Copy everything in the tracee's memory at once.  */
     status =
 	write_data(tracee, stack_pointer - buffer_size, buffer,
 		   buffer_size);
     if (status < 0)
 	return status;
 
-    /* Tracee's stack content is now as follow:
-     *
-     *   +------------+ <- initial stack pointer (higher address)
-     *   |  padding   |
-     *   +------------+
-     *   |  string3   |
-     *   +------------+
-     *   |  string2   |
-     *   +------------+
-     *   |  string1   |
-     *   +------------+
-     *   |   start    |
-     *   +------------+
-     *   | mmap anon  |
-     *   +------------+
-     *   | mmap file  |
-     *   +------------+
-     *   | open next  |
-     *   +------------+
-     *   | mmap anon. |
-     *   +------------+
-     *   | mmap file  |
-     *   +------------+
-     *   |   open     |
-     *   +------------+ <- stack pointer, userarg1 (word aligned)
-     */
-
-    /* Remember we are in the sysexit stage, so be sure the
-     * current register values will be used as-is at the end.  */
     save_current_regs(tracee, ORIGINAL);
     tracee->_regs_were_changed = true;
 
     return 0;
 }
 
-/**
- * Start the loading of @tracee.  This function returns no error since
- * it's either too late to do anything useful (the calling process is
- * already replaced) or the error reported by the kernel
- * (syscall_result < 0) will be propagated as-is.
- */
 void translate_execve_exit(Tracee *tracee)
 {
     word_t syscall_result;
     int status;
 
     if (IS_NOTIFICATION_PTRACED_LOAD_DONE(tracee)) {
-	/* Be sure not to confuse the ptracer with an
-	 * unexpected syscall/returned value.  */
 	poke_reg(tracee, SYSARG_RESULT, 0);
 	set_sysnum(tracee, PR_execve);
 
-	/* According to most ABIs, all registers have
-	 * undefined values at program startup except:
-	 *
-	 * - the stack pointer
-	 * - the instruction pointer
-	 * - the rtld_fini pointer
-	 * - the state flags
-	 */
 	poke_reg(tracee, STACK_POINTER,
 		 peek_reg(tracee, ORIGINAL, SYSARG_2));
 	poke_reg(tracee, INSTR_POINTER,
@@ -448,29 +349,11 @@ void translate_execve_exit(Tracee *tracee)
 	poke_reg(tracee, RTLD_FINI, 0);
 	poke_reg(tracee, STATE_FLAGS, 0);
 
-	/* Restore registers to their current values.  */
 	save_current_regs(tracee, ORIGINAL);
 	tracee->_regs_were_changed = true;
 
-	/* This is is required to make GDB work correctly
-	 * under PRoot, however it deserves to be used
-	 * unconditionally.  */
 	(void) bind_proc_pid_auxv(tracee);
 
-	/* If the PTRACE_O_TRACEEXEC option is *not* in effect
-	 * for the execing tracee, the kernel delivers an
-	 * extra SIGTRAP to the tracee after execve(2)
-	 * *returns*.  This is an ordinary signal (similar to
-	 * one which can be generated by "kill -TRAP"), not a
-	 * special kind of ptrace-stop.  Employing
-	 * PTRACE_GETSIGINFO for this signal returns si_code
-	 * set to 0 (SI_USER).  This signal may be blocked by
-	 * signal mask, and thus may be delivered (much)
-	 * later. -- man 2 ptrace
-	 *
-	 * This signal is delayed so far since the program was
-	 * not fully loaded yet; GDB would get "invalid
-	 * adress" errors otherwise.  */
 	if ((tracee->as_ptracee.options & PTRACE_O_TRACEEXEC) == 0)
 	    kill(tracee->pid, SIGTRAP);
 
@@ -481,20 +364,14 @@ void translate_execve_exit(Tracee *tracee)
     if ((int) syscall_result < 0)
 	return;
 
-    /* PR_SET_NO_NEW_PRIVS belongs to the program from now on, see
-     * translate_syscall_enter().  */
     tracee->seen_execve = true;
 
-    /* Execve happened; commit the new "/proc/self/exe".  */
     if (tracee->new_exe != NULL) {
 	(void) talloc_unlink(tracee, tracee->exe);
 	tracee->exe = talloc_reference(tracee, tracee->new_exe);
 	talloc_set_name_const(tracee->exe, "$exe");
     }
 
-    /* New processes have no heap. The process could've been cloned with
-     * CLONE_VM so it has been sharing the heap with its parent. execve()
-     * discards the VM so make sure to reallocate new heap. */
     if (talloc_reference_count(tracee->heap) > 0) {
 	talloc_unlink(tracee, tracee->heap);
 	tracee->heap = talloc_zero(tracee, Heap);
@@ -504,11 +381,8 @@ void translate_execve_exit(Tracee *tracee)
 	bzero(tracee->heap, sizeof(Heap));
     }
 
-    /* The copy of the previous program's auxiliary vector, if
-     * any, is obsolete.  */
     TALLOC_FREE(tracee->auxv_path);
 
-    /* Transfer the load script to the loader.  */
     status = transfer_load_script(tracee);
     if (status < 0)
 	note(tracee, ERROR, INTERNAL,

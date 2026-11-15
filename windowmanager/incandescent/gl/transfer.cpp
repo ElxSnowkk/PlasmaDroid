@@ -8,22 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-// GL 3.0 enums that live in glext.h, which not every include path pulls in.
-
-
-
-// One scratch per thread: uploads can happen on any thread that holds a
-// context, and nothing here takes a lock.
-
-// The scratch only ever grew: resize() to a smaller size keeps the capacity, so
-// one 16384x8192 atlas pinned half a gigabyte on that thread for the life of the
-// process even though every later upload was a few kilobytes. Handed back once
-// the transfer is done and the peak was large.
-
-// width * height * depth * channels without wrapping.
-
 // ---------------------------------------------------------------------------
 // Decoders. Each reads one source pixel and writes RGBA (or RGB) bytes in
 // memory order. The packed GL_UNSIGNED_INT_* types are defined as components
@@ -32,98 +16,6 @@
 // integer load is endian-correct by construction. Only GL_UNSIGNED_BYTE
 // addresses memory directly, and its component order *is* memory order.
 // ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-// Straight copies. GLES accepts these pairs already, so they are only ever
-// selected when the destination format needs a different number of channels than
-// the source carries -- see the note on want_format below.
-
-
-
-
-
-
-
-// The context the mirror in gl/pixel.cpp was last confirmed against, or ~0 for
-// none -- which context 0, the fallback for a context this layer never saw
-// created, is a legitimate value for.
-//
-// The mirror keys itself on gl_state, a pointer into the MGContext record, and a
-// destroyed context's record can be handed back to the next one at the same
-// address. The id never is (egl/context.h), so requiring both closes the one hole
-// the pointer alone leaves.
-
-// The six unpack parameters an upload has to know, without asking the driver for
-// them every time. See inc_unpack_state() in gl/pixel.h for why the mirror can be
-// trusted and when it cannot.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Let go of whatever the source was read through -- the unpack buffer itself, or
-// the scratch it had to be copied into first.
-
-
-// ---------------------------------------------------------------------------
-// Readback
-// ---------------------------------------------------------------------------
-
-
-// Encoders: RGBA memory-order bytes in, one destination pixel out.
-
-// Channel subsets of the RGBA the driver hands back. GLES only guarantees a
-// GL_RGBA/GL_UNSIGNED_BYTE readback, so an application asking for plain GL_RGB or
-// GL_RED -- the ordinary way to dump an atlas or a single-channel map -- used to
-// be handed straight to the driver, which refuses it and leaves the destination
-// exactly as it was.
-
-
-
-
-
-
-
-
-// The inverses of dec_bgra_1555_rev / dec_bgra_4444_rev, bit for bit. Narrowing
-// truncates, which is exactly what the decoders' replication expands back: 5-bit
-// 31 decodes to 255 and encodes to 31 again, 4-bit 15 to 255 and back. An 8-bit
-// value the decoder could not have produced lands on the level below it -- at five
-// bits 130 encodes to 16 and reads back as 132, at four bits 200 encodes to 12 and
-// reads back as 204 -- which is the precision of the format the application asked
-// for, not a loss this file introduces. Alpha is one bit in 1555: it rounds at 128,
-// so the decoder's own 0 and 255 come back unchanged.
-
-
-
-// Whether the driver took a call, asked of the driver directly: this layer's own
-// glGetError always answers GL_NO_ERROR, so it cannot report anything. gl/multidraw.cpp
-// probes the same way for the same reason.
-
-// Empty the queue first, or an error the application left pending would be read as
-// our own failure. Nothing observable is lost -- those entries could never reach the
-// application anyway.
 
 #include "transfer.h"
 #include "buffer.h"

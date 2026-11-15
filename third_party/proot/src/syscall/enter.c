@@ -20,16 +20,16 @@
  * 02110-1301 USA.
  */
 
-#include <errno.h>		/* errno(3), E* */
-#include <talloc.h>		/* talloc_*, */
-#include <sys/un.h>		/* struct sockaddr_un, */
-#include <linux/net.h>		/* SYS_*, */
-#include <fcntl.h>		/* AT_FDCWD, */
-#include <limits.h>		/* PATH_MAX, */
-#include <stdio.h>		/* snprintf(3), */
-#include <string.h>		/* strcpy */
-#include <unistd.h>		/* read(2), write(2), close(2), */
-#include <sys/prctl.h>		/* PR_SET_DUMPABLE */
+#include <errno.h>
+#include <talloc.h>
+#include <sys/un.h>
+#include <linux/net.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/prctl.h>
 #include "syscall/syscall.h"
 #include "syscall/sysnum.h"
 #include "syscall/socket.h"
@@ -48,24 +48,15 @@
 #include "path/temp.h"
 #include "arch.h"
 
-/**
- * Translate @path and put the result in the @tracee's memory address
- * space pointed to by the @reg argument of the current syscall. See
- * the documentation of translate_path() about the meaning of
- * @type. This function returns -errno if an error occured, otherwise
- * 0.
- */
 static int translate_path2(Tracee *tracee, int dir_fd, char path[PATH_MAX],
 			   Reg reg, Type type)
 {
     char new_path[PATH_MAX];
     int status;
 
-    /* Special case where the argument was NULL. */
     if (path[0] == '\0')
 	return 0;
 
-    /* Translate the original path. */
     status =
 	translate_path(tracee, new_path, dir_fd, path, type != SYMLINK);
     if (status < 0)
@@ -74,15 +65,11 @@ static int translate_path2(Tracee *tracee, int dir_fd, char path[PATH_MAX],
     return set_sysarg_path(tracee, new_path, reg);
 }
 
-/**
- * A helper, see the comment of the function above.
- */
 static int translate_sysarg(Tracee *tracee, Reg reg, Type type)
 {
     char old_path[PATH_MAX];
     int status;
 
-    /* Extract the original path. */
     status = get_sysarg_path(tracee, old_path, reg);
     if (status < 0)
 	return status;
@@ -90,15 +77,6 @@ static int translate_sysarg(Tracee *tracee, Reg reg, Type type)
     return translate_path2(tracee, AT_FDCWD, old_path, reg, type);
 }
 
-/**
- * Make the @reg argument of the current syscall point to a copy of
- * @tracee's auxiliary vector with AT_EXECFN fixed up, if @user_path
- * names the tracee's own auxv file -- as "/proc/self/auxv" or
- * "/proc/<pid>/auxv", the spellings QEMU's user-mode emulation answers
- * too -- and @flags open it for reading only.  The kernel shows there
- * the vector it saved for the loader, whose AT_EXECFN names the loader
- * instead of the program.
- */
 static void redirect_own_auxv(Tracee *tracee,
 			      const char user_path[PATH_MAX], int flags,
 			      Reg reg)
@@ -120,8 +98,6 @@ static void redirect_own_auxv(Tracee *tracee,
 	&& strcmp(user_path, proc_path) != 0)
 	return;
 
-    /* A binding over this file, such as the one bind_proc_pid_auxv()
-     * makes for a ptraced tracee, is left alone.  */
     if (get_sysarg_path(tracee, host_path, reg) < 0
 	|| strcmp(host_path, proc_path) != 0)
 	return;
@@ -133,8 +109,6 @@ static void redirect_own_auxv(Tracee *tracee,
 	size = read(fd, vectors, sizeof(vectors));
 	(void) close(fd);
 
-	/* A vector filling the buffer might have been cut short, and
-	 * a truncated copy would be worse than the kernel's own.  */
 	if (size <= 0 || (size_t) size == sizeof(vectors)
 	    || !fix_up_execfn(tracee, vectors, size))
 	    return;
@@ -156,12 +130,6 @@ static void redirect_own_auxv(Tracee *tracee,
     (void) set_sysarg_path(tracee, tracee->auxv_path, reg);
 }
 
-/**
- * Translate the input arguments of the current @tracee's syscall in the
- * @tracee->pid process area. This function sets @tracee->status to
- * -errno if an error occured from the tracee's point-of-view (EFAULT
- * for instance), otherwise 0.
- */
 int translate_syscall_enter(Tracee *tracee)
 {
     int flags;
@@ -185,11 +153,9 @@ int translate_syscall_enter(Tracee *tracee)
     if (status > 0)
 	return 0;
 
-    /* Translate input arguments. */
     syscall_number = get_sysnum(tracee, ORIGINAL);
     switch (syscall_number) {
     default:
-	/* Nothing to do. */
 	status = 0;
 	break;
 
@@ -221,8 +187,6 @@ int translate_syscall_enter(Tracee *tracee)
 	    struct stat statl;
 	    char *tmp;
 
-	    /* The ending "." ensures an error will be reported if
-	     * path does not exist or if it is not a directory.  */
 	    if (syscall_number == PR_chdir) {
 		status = get_sysarg_path(tracee, path, SYSARG_1);
 		if (status < 0)
@@ -246,29 +210,13 @@ int translate_syscall_enter(Tracee *tracee)
 	    if (status < 0)
 		break;
 
-	    /* Check this directory is accessible.  */
 	    if ((statl.st_mode & S_IXUSR) == 0)
 		return -EACCES;
-
-	    /* Sadly this method doesn't detranslate statefully,
-	     * this means that there's an ambiguity when several
-	     * bindings are from the same host path:
-	     *
-	     *    $ proot -m /tmp:/a -m /tmp:/b fchdir_getcwd /a
-	     *    /b
-	     *
-	     *    $ proot -m /tmp:/b -m /tmp:/a fchdir_getcwd /a
-	     *    /a
-	     *
-	     * A solution would be to follow each file descriptor
-	     * just like it is done for cwd.
-	     */
 
 	    status = detranslate_path(tracee, path, NULL);
 	    if (status < 0)
 		break;
 
-	    /* Remove the trailing "/" or "/.".  */
 	    chop_finality(path);
 
 	    tmp = talloc_strdup(tracee->fs, path);
@@ -323,7 +271,6 @@ int translate_syscall_enter(Tracee *tracee)
 
     case PR_accept:
     case PR_accept4:
-	/* Nothing special to do if no sockaddr was specified.  */
 	if (peek_reg(tracee, ORIGINAL, SYSARG_2) == 0) {
 	    status = 0;
 	    break;
@@ -334,17 +281,10 @@ int translate_syscall_enter(Tracee *tracee)
     case PR_getpeername:{
 	    int size;
 
-	    /* Remember: PEEK_WORD puts -errno in status and breaks if an
-	     * error occured.  */
 	    size = (int)
 		PEEK_WORD(peek_reg(tracee, ORIGINAL, SYSARG_3),
 			  special ? -EINVAL : 0);
 
-	    /* The "size" argument is both used as an input parameter
-	     * (max. size) and as an output parameter (actual size).  The
-	     * exit stage needs to know the max. size to not overwrite
-	     * anything, that's why it is copied in the 6th argument
-	     * (unused) before the kernel updates it.  */
 	    poke_reg(tracee, SYSARG_6, size);
 
 	    status = 0;
@@ -363,13 +303,11 @@ int translate_syscall_enter(Tracee *tracee)
 	    switch (peek_reg(tracee, CURRENT, SYSARG_1)) {
 	    case SYS_BIND:
 	    case SYS_CONNECT:
-		/* Handle these cases below.  */
 		status = 1;
 		break;
 
 	    case SYS_ACCEPT:
 	    case SYS_ACCEPT4:
-		/* Nothing special to do if no sockaddr was specified.  */
 		sock_addr = PEEK_WORD(SYSARG_ADDR(2), 0);
 		if (sock_addr == 0) {
 		    status = 0;
@@ -379,12 +317,9 @@ int translate_syscall_enter(Tracee *tracee)
 		/* Fall through.  */
 	    case SYS_GETSOCKNAME:
 	    case SYS_GETPEERNAME:
-		/* Remember: PEEK_WORD puts -errno in status and breaks
-		 * if an error occured.  */
 		size_addr = PEEK_WORD(SYSARG_ADDR(3), 0);
 		size = (int) PEEK_WORD(size_addr, special ? -EINVAL : 0);
 
-		/* See case PR_accept for explanation.  */
 		poke_reg(tracee, SYSARG_6, size);
 		status = 0;
 		break;
@@ -394,12 +329,9 @@ int translate_syscall_enter(Tracee *tracee)
 		break;
 	    }
 
-	    /* An error occured or there's nothing else to do.  */
 	    if (status <= 0)
 		break;
 
-	    /* Remember: PEEK_WORD puts -errno in status and breaks if an
-	     * error occured.  */
 	    sock_addr = PEEK_WORD(SYSARG_ADDR(2), 0);
 	    size = PEEK_WORD(SYSARG_ADDR(3), 0);
 
@@ -408,12 +340,9 @@ int translate_syscall_enter(Tracee *tracee)
 	    if (status <= 0)
 		break;
 
-	    /* These parameters are used/restored at the exit stage.  */
 	    poke_reg(tracee, SYSARG_5, sock_addr_saved);
 	    poke_reg(tracee, SYSARG_6, size);
 
-	    /* Remember: POKE_WORD puts -errno in status and breaks if an
-	     * error occured.  */
 	    POKE_WORD(SYSARG_ADDR(2), sock_addr);
 	    POKE_WORD(SYSARG_ADDR(3), sizeof(struct sockaddr_un));
 
@@ -589,7 +518,6 @@ int translate_syscall_enter(Tracee *tracee)
 	if (status < 0)
 	    break;
 
-	/* The following check covers only 90% of the cases. */
 	if (path[0] == '/' || path[0] == '.') {
 	    status =
 		translate_path2(tracee, AT_FDCWD, path, SYSARG_1, REGULAR);
@@ -686,18 +614,11 @@ int translate_syscall_enter(Tracee *tracee)
 			    && peek_reg(tracee, CURRENT, SYSARG_4) == 0
 			    && peek_reg(tracee, CURRENT, SYSARG_5) == 0);
 
-	    /* Prevent tracees from setting dumpable flag.
-	     * (Otherwise it could break tracee memory access)  */
 	    if (option == PR_SET_DUMPABLE) {
 		set_sysnum(tracee, PR_void);
 		status = 0;
 	    }
 
-	    /* PRoot sets no_new_privs itself, before the program starts,
-	     * to install its seccomp filter, so the kernel would answer
-	     * PR_GET_NO_NEW_PRIVS for PRoot: answer it at the exit stage
-	     * from the program's own flag instead.  Other arguments get
-	     * the kernel's EINVAL.  */
 	    if (option == PR_GET_NO_NEW_PRIVS && arg2 == 0 && no_more_args) {
 		set_sysnum(tracee, PR_void);
 		tracee->restart_how = PTRACE_SYSCALL;
@@ -705,14 +626,10 @@ int translate_syscall_enter(Tracee *tracee)
 		status = 0;
 	    }
 
-	    /* The kernel accepts only these arguments, and the flag
-	     * cannot be cleared once set.  */
 	    if (option == PR_SET_NO_NEW_PRIVS && arg2 == 1 && no_more_args
 		&& tracee->seen_execve)
 		tracee->no_new_privs = true;
 
-	    /* The vector PR_GET_AUXV copies out is fixed up at the exit
-	     * stage, which has to be hit under seccomp as well.  */
 	    if (option == PR_GET_AUXV && tracee->execfn_addr != 0) {
 		tracee->restart_how = PTRACE_SYSCALL;
 		tracee->sysexit_pending = true;

@@ -8,34 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-// See inc_set_gl_error in gl/inc.h for why this exists and why it is per thread.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ---- Incandescent: nome do renderer extraído da GPU real e relatório (ver INCANDESCENT-MODIFICATIONS.md) ----
-// Substitui {GPU} no modelo pelo nome devolvido pelo driver GLES real (consultado por este módulo). Sem nome: "Unknown GPU" (não esconde).
-
-// Lê uma string do driver GLES real SEM construir std::string a partir de NULL.
-// glGetString devolve NULL quando não há contexto corrente (ou o símbolo não resolveu); std::string(NULL) é UB e, no
-// libc++ hardened do NDK, vira `brk` (SIGTRAP) dentro do construtor da biblioteca.
-
-// Grava GPU=... e GL_RENDERER_RAW=... em INC_GPU_REPORT (o app mostra isto como prova de qual GPU o Incandescent enxergou).
-
 #include "getter.h"
 #include "enable.h"
 #include "../egl/context.h"

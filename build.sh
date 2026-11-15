@@ -17,7 +17,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# O gradlew do projeto é preferido; o tar pode ter perdido a permissão de execução.
 if [ -f ./gradlew ]; then
   chmod +x ./gradlew 2>/dev/null || true
   GR=(./gradlew)

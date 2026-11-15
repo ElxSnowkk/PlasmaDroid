@@ -8,28 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-// The scratch stream buffer, and the context that owns it. thread_local because
-// g_current_ctx is, so two threads with different current contexts each keep
-// their own name instead of trading one back and forth.
-
-// Drop the cached name when the current context is not the one that created it.
-//
-// inc_restart_invalidate() only runs when the application happens to issue a
-// multi-draw, so without this a plain glDrawElements after a context switch
-// would reuse the old name. Drawing stayed correct because the whole stream is
-// re-uploaded every time, but if the name collides with a buffer the new context
-// owns, the glBufferData below overwrites that buffer's contents.
-
-
-
-
-// Widen to 32 bits, apply the base vertex, and turn the application's chosen
-// restart value into the fixed sentinel the driver understands.
-
 #include "restart.h"
 #include "buffer.h"
 #include "enable.h"

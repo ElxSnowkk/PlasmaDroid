@@ -8,62 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-// The distinct multi-draw *implementations*. Which of them are actually distinct
-// differs per entry point; md_entry_desc_t::allowed encodes that.
-//
-// GLES core has no multi-draw command at all -- not even 3.2, which added only
-// the singular glDrawElementsBaseVertex. Every batched backend below therefore
-// comes from an extension, and each is named after the one that provides it.
-// The first three issue one driver call per sub-draw; the next three issue one
-// call for the whole batch.
-//
-// These integers are never persisted: config.json carries the NAMES, so adding a
-// backend or an entry point can never repoint a value a user already wrote.
-
-// The entry points that have more than one implementation to choose between.
-// glMultiDraw*IndirectCount are absent on purpose: they have exactly one.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Resolved backend for one entry point. Always a concrete backend after
-// init_settings_post(); never md_backend_t::Auto.
-
-// The backend the runtime fallback chains should try after `cur` failed for
-// this entry point: the next item in the user's order. When `cur` is not in the
-// order (a inc_* symbol reached by a direct dlsym), the last item is returned so
-// the chain terminates instead of cycling. Returns the last item too when `cur`
-// already is the last -- callers guard against calling back into `cur`.
-
-// Suffix of the inc_<entry>_<suffix> symbol implementing a backend. One table so
-// the dispatcher in gl/multidraw.cpp and the symbol glx/lookup.cpp hands to the
-// application cannot disagree about which implementation a setting selects.
-
-// Defined in gl/multidraw.cpp: resolves GL_EXT_multi_draw_arrays lazily, because
-// the GLES loader does not carry those entry points and gles/* is not ours to
-// change. Safe to call once a context is current.
-
 #ifndef INCANDESCENT_PLUGIN_SETTINGS_H
 #define INCANDESCENT_PLUGIN_SETTINGS_H
 

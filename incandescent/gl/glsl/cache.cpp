@@ -8,53 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-// SHA256
-
-
-
-
-
-
-
-// Streamed over the caller's buffer. This used to copy the whole shader source
-// into a vector first, only to append nine to seventy-two bytes of padding to
-// it -- a full allocation and copy of the source on top of the hash itself.
-// Only the final partial block is materialised now. Digests are unchanged bit
-// for bit, so caches written by
-// earlier builds still hit; that was checked against the previous
-// implementation over every length up to 300 plus random multi-block inputs,
-// and against the FIPS 180-4 vectors.
-
-
-
-
-
-
-// Persistence policy.
-//
-// put() used to call save() on every insert, and save() rewrites the whole file,
-// so a shader pack loading hundreds of programs paid O(n^2) bytes of I/O for a
-// file that is only ever read once, at startup. That is the stutter felt while a
-// world loads. The on-disk format is one "count, then entries" blob with nowhere
-// to append a single record, and it has to stay exactly that so caches written by
-// older builds keep loading -- what a save costs therefore cannot change, only
-// how often one happens.
-//
-// A save is deferred until 16 entries are pending or 5 seconds have passed since
-// the last one, whichever comes first, and the check runs on every cache
-// operation rather than only on inserts so that a run of hits still flushes a
-// tail left by earlier misses. The exposure that buys is bounded and small: a
-// crash or an Android kill loses at most the 15 most recently translated
-// shaders, and only ones translated since the last flush -- they are recompiled
-// and re-cached on the next run. Nothing older can be lost, because save() no
-// longer overwrites the live file in place.
-//
-// The alternative shape, write-behind on a thread, was rejected: it needs a
-// lock around cacheList that nothing in this class has today, and a background
-// writer racing an Android kill has the same failure window anyway.
-
 #include "cache.h"
 #include <cstdio>
 #include <cstring>

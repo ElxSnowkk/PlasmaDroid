@@ -21,24 +21,24 @@
  */
 
 #include <stdio.h>
-#include <sched.h>		/* CLONE_*,  */
-#include <sys/types.h>		/* pid_t, */
-#include <sys/ptrace.h>		/* ptrace(1), PTRACE_*, */
-#include <sys/types.h>		/* waitpid(2), */
-#include <sys/wait.h>		/* waitpid(2), */
-#include <sys/utsname.h>	/* uname(2), */
-#include <unistd.h>		/* fork(2), chdir(2), getpid(2), */
-#include <string.h>		/* strcmp(3), */
-#include <errno.h>		/* errno(3), */
-#include <stdbool.h>		/* bool, true, false, */
-#include <assert.h>		/* assert(3), */
-#include <stdlib.h>		/* atexit(3), getenv(3), */
-#include <talloc.h>		/* talloc_*, */
-#include <inttypes.h>		/* PRI*, */
-#include <linux/version.h>	/* KERNEL_VERSION, */
-#include <sys/prctl.h>		/* prctl(2), PR_*, */
-#include <signal.h>		/* SIGSYS, siginfo_t, */
-#include <sys/uio.h>		/* struct iovec, */
+#include <sched.h>
+#include <sys/types.h>
+#include <sys/ptrace.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/utsname.h>
+#include <unistd.h>
+#include <string.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <assert.h>
+#include <stdlib.h>
+#include <talloc.h>
+#include <inttypes.h>
+#include <linux/version.h>
+#include <sys/prctl.h>
+#include <signal.h>
+#include <sys/uio.h>
 
 #include "tracee/event.h"
 #include "cli/note.h"
@@ -53,23 +53,14 @@
 #include "attribute.h"
 #include "compat.h"
 
-
-/**
- * Start @tracee->exe with the given @argv[].  This function
- * returns -errno if an error occurred, otherwise 0.
- */
 int launch_process(Tracee *tracee, char *const argv[])
 {
     char *const default_argv[] = { "-sh", NULL };
     long status;
     pid_t pid;
 
-    /* Warn about open file descriptors. They won't be
-     * translated until they are closed. */
     list_open_fd(tracee);
 
-    /* The program would inherit the no_new_privs flag of PRoot's
-     * caller, whatever PRoot sets for itself.  */
     tracee->no_new_privs = (prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) == 1);
 
     pid = fork();
@@ -78,24 +69,15 @@ int launch_process(Tracee *tracee, char *const argv[])
 	note(tracee, ERROR, SYSTEM, "fork()");
 	return -errno;
 
-    case 0:			/* child */
-	/* Declare myself as ptraceable before executing the
-	 * requested program. */
+    case 0:
 	status = ptrace(PTRACE_TRACEME, 0, NULL, NULL);
 	if (status < 0) {
 	    int child_errno = errno;
 	    errno = child_errno;
 	    note(tracee, ERROR, SYSTEM, "ptrace(TRACEME)");
-	    /* Never return into PRoot's main loop from the forked child.
-	     * Doing so can turn a launch failure into an opaque exit 255. */
 	    _exit(126);
 	}
 
-	/* Synchronize with the tracer's event loop.  Without
-	 * this trick the tracer only sees the "return" from
-	 * the next execve(2) so PRoot wouldn't handle the
-	 * interpreter/runner.  I also verified that strace
-	 * does the same thing. */
 	if (kill(getpid(), SIGSTOP) < 0) {
 	    int child_errno = errno;
 	    errno = child_errno;
@@ -103,21 +85,11 @@ int launch_process(Tracee *tracee, char *const argv[])
 	    _exit(126);
 	}
 
-	/* Improve performance by using seccomp mode 2, unless
-	 * this support is explicitly disabled.  */
 	if (getenv("PROOT_NO_SECCOMP") == NULL)
 	    (void) enable_syscall_filtering(tracee);
 
-	/* Now process is ptraced, so the current rootfs is already the
-	 * guest rootfs.  Note: Valgrind can't handle execve(2) on
-	 * "foreign" binaries (ENOEXEC) but can handle execvp(3) on such
-	 * binaries.  */
 	VERBOSE(tracee, 2, "launching executable '%s'", tracee->exe);
 	execvp(tracee->exe, argv[0] != NULL ? argv : default_argv);
-	/* execvp() only returns on failure.  Returning from this function
-	 * in the child continues through PRoot's normal control flow and can
-	 * produce exit=255 without exposing the actual exec error.  Report the
-	 * errno while it is still valid, then exit as a failed guest launch. */
 	{
 	    int child_errno = errno;
 	    errno = child_errno;
@@ -125,18 +97,14 @@ int launch_process(Tracee *tracee, char *const argv[])
 	    _exit(127);
 	}
 
-    default:			/* parent */
-	/* We know the pid of the first tracee now.  */
+    default:
 	tracee->pid = pid;
 	return 0;
     }
 
-    /* Never reached.  */
     return -ENOSYS;
 }
 
-/* Send the KILL signal to all tracees when PRoot has received a fatal
- * signal.  */
 static void kill_all_tracees2(int signum, siginfo_t *siginfo UNUSED,
 			      void *ucontext UNUSED)
 {
@@ -144,16 +112,10 @@ static void kill_all_tracees2(int signum, siginfo_t *siginfo UNUSED,
 	 signum, siginfo->si_pid);
     kill_all_tracees();
 
-    /* Exit immediately for system signals (segmentation fault,
-     * illegal instruction, ...), otherwise exit cleanly through
-     * the event loop.  */
     if (signum != SIGQUIT)
 	_exit(EXIT_FAILURE);
 }
 
-/**
- * Helper for print_talloc_hierarchy().
- */
 static void print_talloc_chunk(const void *ptr, int depth,
 			       int max_depth UNUSED, int is_ref,
 			       void *data UNUSED)
@@ -214,7 +176,6 @@ static void print_talloc_chunk(const void *ptr, int depth,
     fprintf(stderr, "\n");
 }
 
-/* Print on stderr the complete talloc hierarchy.  */
 static void print_talloc_hierarchy(int signum, siginfo_t *siginfo UNUSED,
 				   void *ucontext UNUSED)
 {
@@ -234,9 +195,6 @@ static void print_talloc_hierarchy(int signum, siginfo_t *siginfo UNUSED,
 
 static int last_exit_status = -1;
 
-/**
- * Check if kernel >= 4.8
- */
 static bool is_kernel_4_8(void)
 {
     static int version_48 = -1;
@@ -261,9 +219,6 @@ static bool is_kernel_4_8(void)
     return version_48;
 }
 
-/**
- * Check if this instance of PRoot can *technically* handle @tracee.
- */
 static void check_architecture(Tracee *tracee)
 {
     struct utsname utsname;
@@ -301,31 +256,22 @@ static void check_architecture(Tracee *tracee)
 	 "A 64-bit version that supports 32-bit binaries is required");
 }
 
-/**
- * Wait then handle any event from any tracee.  This function returns
- * the exit status of the last terminated program.
- */
 int event_loop()
 {
     struct sigaction signal_action;
     long status;
     int signum;
 
-    /* Kill all tracees when exiting.  */
     status = atexit(kill_all_tracees);
     if (status != 0)
 	note(NULL, WARNING, INTERNAL, "atexit() failed");
 
-    /* All signals are blocked when the signal handler is called.
-     * SIGINFO is used to know which process has signaled us and
-     * RESTART is used to restart waitpid(2) seamlessly.  */
     bzero(&signal_action, sizeof(signal_action));
     signal_action.sa_flags = SA_SIGINFO | SA_RESTART;
     status = sigfillset(&signal_action.sa_mask);
     if (status < 0)
 	note(NULL, WARNING, SYSTEM, "sigfillset()");
 
-    /* Handle all signals.  */
     for (signum = 0; signum < SIGRTMAX; signum++) {
 	switch (signum) {
 	case SIGQUIT:
@@ -333,16 +279,11 @@ int event_loop()
 	case SIGABRT:
 	case SIGFPE:
 	case SIGSEGV:
-	    /* Kill all tracees on abnormal termination
-	     * signals.  This ensures no process is left
-	     * untraced.  */
 	    signal_action.sa_sigaction = kill_all_tracees2;
 	    break;
 
 	case SIGUSR1:
 	case SIGUSR2:
-	    /* Print on stderr the complete talloc
-	     * hierarchy, useful for debug purpose.  */
 	    signal_action.sa_sigaction = print_talloc_hierarchy;
 	    break;
 
@@ -352,13 +293,9 @@ int event_loop()
 	case SIGTSTP:
 	case SIGTTIN:
 	case SIGTTOU:
-	    /* The default action is OK for these signals,
-	     * they are related to tty and job control.  */
 	    continue;
 
 	default:
-	    /* Ignore all other signals, including
-	     * terminating ones (^C for instance). */
 	    signal_action.sa_sigaction = (void *) SIG_IGN;
 	    break;
 	}
@@ -374,10 +311,8 @@ int event_loop()
 	int signal;
 	pid_t pid;
 
-	/* This is the only safe place to free tracees.  */
 	free_terminated_tracees();
 
-	/* Wait for the next tracee's stop. */
 	pid = waitpid(-1, &tracee_status, __WALL);
 	if (pid < 0) {
 	    if (errno != ECHILD) {
@@ -387,7 +322,6 @@ int event_loop()
 	    break;
 	}
 
-	/* Get information about this tracee. */
 	tracee = get_tracee(NULL, pid, true);
 	assert(tracee != NULL);
 
@@ -418,21 +352,10 @@ int event_loop()
 #define SYS_SECCOMP 1
 #endif
 
-/* <linux/elf.h> conflicts with execve/elf.h (PT_*, PF_* redefinitions): use the constant directly.  */
 #ifndef NT_PRSTATUS
 #define NT_PRSTATUS 1
 #endif
 
-/**
- * [ASDroid] Android installs a seccomp filter in every app process that uses
- * SECCOMP_RET_TRAP for syscalls that are not allowed (statx/faccessat2/clone3/
- * rseq/... depending on the Android release).  The kernel then raises SIGSYS
- * and the tracee dies silently, which makes PRoot exit with 255 and no output.
- * Like the Termux build, intercept that SIGSYS, make the syscall fail with
- * ENOSYS (glibc/musl fall back to the older syscalls) and resume the tracee.
- * Returns true when the signal was consumed.  A SIGSYS sent by kill(2) or by
- * a seccomp filter of the tracee itself (si_errno != 0) is delivered as-is.
- */
 static bool handle_android_sigsys(Tracee *tracee)
 {
     siginfo_t info;
@@ -445,15 +368,6 @@ static bool handle_android_sigsys(Tracee *tracee)
 	return false;
 
 #if defined(ARCH_ARM64)
-    /* PRoot itself voids a syscall (syscall number -1) when its translation
-     * fails (ENOENT for a missing path, EACCES...) and writes the real errno
-     * at the exit stage.  The Android allow-list filter does not know number
-     * -1 and raises SIGSYS *after* that exit stage.  The effective number is
-     * kept in the NT_ARM_SYSTEM_CALL regset (x8 still holds the original
-     * one, which is why the log shows openat/newfstatat/brk...).  In that
-     * case the result register is already correct: just swallow the signal.
-     * Overwriting it with -ENOSYS turned every ENOENT into "Function not
-     * implemented" (ld.so, dash PATH search, ls...).  */
     {
 	int effective_nr = 0;
 	struct iovec nr_iov;
@@ -476,10 +390,6 @@ static bool handle_android_sigsys(Tracee *tracee)
 
     poke_reg(tracee, SYSARG_RESULT, (word_t) -ENOSYS);
 
-    /* Write the registers back by hand: push_regs() would also "restore" the
-     * sysarg/stack-pointer registers from the ORIGINAL copy left over by an
-     * earlier syscall (restore_original_regs), corrupting SP/args at a
-     * signal-delivery-stop and killing the tracee with SIGBUS/SIGSEGV.  */
 #if defined(ARCH_ARM64)
     {
 	struct iovec iov;
@@ -496,38 +406,21 @@ static bool handle_android_sigsys(Tracee *tracee)
     return true;
 }
 
-/**
- * For kernels >= 4.8.0
- * Handle the current event (@tracee_status) of the given @tracee.
- * This function returns the "computed" signal that should be used to
- * restart the given @tracee.
- */
 static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 					  int tracee_status)
 {
     static bool seccomp_detected = false;
-    static bool seccomp_enabled = false;	/* added for 4.8.0 */
+    static bool seccomp_enabled = false;
     long status;
     int signal;
 
-    /* Don't overwrite restart_how if it is explicitly set
-     * elsewhere, i.e in the ptrace emulation when single
-     * stepping.  */
     if (tracee->restart_how == 0) {
-	/* When seccomp is enabled, all events are restarted in
-	 * non-stop mode, but this default choice could be overwritten
-	 * later if necessary.  The check against "sysexit_pending"
-	 * ensures PTRACE_SYSCALL (used to hit the exit stage under
-	 * seccomp) is not cleared due to an event that would happen
-	 * before the exit stage, eg. PTRACE_EVENT_EXEC for the exit
-	 * stage of execve(2).  */
 	if (tracee->seccomp == ENABLED && !tracee->sysexit_pending)
 	    tracee->restart_how = PTRACE_CONT;
 	else
 	    tracee->restart_how = PTRACE_SYSCALL;
     }
 
-    /* Not a signal-stop by default.  */
     signal = 0;
 
     if (WIFEXITED(tracee_status)) {
@@ -541,8 +434,6 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 	VERBOSE(tracee, 1,
 		"vpid %" PRIu64 ": terminated with signal %d",
 		tracee->vpid, WTERMSIG(tracee_status));
-	/* [ASDroid] shell convention (128+sig) instead of a mute 255, and say so
-	 * for crash-type signals even without -v.  */
 	if (tracee->vpid == 1) {
 	    int sig = WTERMSIG(tracee_status);
 	    last_exit_status = 128 + sig;
@@ -553,8 +444,6 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 	}
 	terminate_tracee(tracee);
     } else if (WIFSTOPPED(tracee_status)) {
-	/* Don't use WSTOPSIG() to extract the signal
-	 * since it clears the PTRACE_EVENT_* bits. */
 	signal = (tracee_status & 0xfff00) >> 8;
 
 	switch (signal) {
@@ -570,27 +459,17 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 		     PTRACE_O_TRACEEXEC |
 		     PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT);
 
-		/* Distinguish some events from others and
-		 * automatically trace each new process with
-		 * the same options.
-		 *
-		 * Note that only the first bare SIGTRAP is
-		 * related to the tracing loop, others SIGTRAP
-		 * carry tracing information because of
-		 * TRACE*FORK/CLONE/EXEC.  */
 		if (deliver_sigtrap)
-		    break;	/* Deliver this signal as-is.  */
+		    break;
 
 		deliver_sigtrap = true;
 
-		/* Try to enable seccomp mode 2...  */
 		status =
 		    ptrace(PTRACE_SETOPTIONS, tracee->pid,
 			   NULL,
 			   default_ptrace_options | PTRACE_O_TRACESECCOMP);
 		if (status < 0) {
 		    seccomp_enabled = false;
-		    /* ... otherwise use default options only.  */
 		    status =
 			ptrace(PTRACE_SETOPTIONS,
 			       tracee->pid, NULL, default_ptrace_options);
@@ -621,8 +500,6 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 		unsigned long flags = 0;
 		signal = 0;
 
-		/* Use the common ptrace flow if seccomp was
-		 * explicitly disabled for this tracee.  */
 		if (tracee->seccomp != ENABLED)
 		    break;
 
@@ -646,25 +523,17 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 
 	    signal = 0;
 
-	    /* This tracee got signaled then freed during the
-	       sysenter stage but the kernel reports the sysexit
-	       stage; just discard this spurious tracee/event.  */
-
 	    if (tracee->exe == NULL) {
-		tracee->restart_how = PTRACE_CONT;	/* SYSCALL OR CONT */
+		tracee->restart_how = PTRACE_CONT;
 		return 0;
 	    }
 
 	    switch (tracee->seccomp) {
 	    case ENABLED:
 		if (IS_IN_SYSENTER(tracee)) {
-		    /* sysenter: ensure the sysexit
-		     * stage will be hit under seccomp.  */
 		    tracee->restart_how = PTRACE_SYSCALL;
 		    tracee->sysexit_pending = true;
 		} else {
-		    /* sysexit: the next sysenter
-		     * will be notified by seccomp.  */
 		    tracee->restart_how = PTRACE_CONT;
 		    tracee->sysexit_pending = false;
 		}
@@ -672,7 +541,6 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 	    case DISABLED:
 		translate_syscall(tracee);
 
-		/* This syscall has disabled seccomp.  */
 		if (tracee->seccomp == DISABLING) {
 		    tracee->restart_how = PTRACE_SYSCALL;
 		    tracee->seccomp = DISABLED;
@@ -681,9 +549,6 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 		break;
 
 	    case DISABLING:
-		/* Seccomp was disabled by the
-		 * previous syscall, but its sysenter
-		 * stage was already handled.  */
 		tracee->seccomp = DISABLED;
 		if (IS_IN_SYSENTER(tracee))
 		    tracee->status = 1;
@@ -709,15 +574,11 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 	    break;
 
 	case SIGSTOP:
-	    /* Stop this tracee until PRoot has received
-	     * the EVENT_*FORK|CLONE notification.  */
 	    if (tracee->exe == NULL) {
 		tracee->sigstop = SIGSTOP_PENDING;
 		signal = -1;
 	    }
 
-	    /* For each tracee, the first SIGSTOP
-	     * is only used to notify the tracer.  */
 	    if (tracee->sigstop == SIGSTOP_IGNORED) {
 		tracee->sigstop = SIGSTOP_ALLOWED;
 		signal = 0;
@@ -725,30 +586,20 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee,
 	    break;
 
 	case SIGSYS:
-	    /* [ASDroid] swallow Android seccomp SIGSYS.  */
 	    if (handle_android_sigsys(tracee))
 		signal = 0;
 	    break;
 
 	default:
-	    /* Deliver this signal as-is.  */
 	    break;
 	}
     }
 
-    /* Clear the pending event, if any.  */
     tracee->as_ptracee.event4.proot.pending = false;
 
     return signal;
 }
 
-
-/**
- * For kernels < 4.8.0
- * Handle the current event (@tracee_status) of the given @tracee.
- * This function returns the "computed" signal that should be used to
- * restart the given @tracee.
- */
 int handle_tracee_event(Tracee *tracee, int tracee_status)
 {
     static bool seccomp_detected = false;
@@ -757,24 +608,13 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 
     if (is_kernel_4_8())
 	return handle_tracee_event_kernel_4_8(tracee, tracee_status);
-    /* Don't overwrite restart_how if it is explicitly set
-     * elsewhere, i.e in the ptrace emulation when single
-     * stepping.  */
     if (tracee->restart_how == 0) {
-	/* When seccomp is enabled, all events are restarted in
-	 * non-stop mode, but this default choice could be overwritten
-	 * later if necessary.  The check against "sysexit_pending"
-	 * ensures PTRACE_SYSCALL (used to hit the exit stage under
-	 * seccomp) is not cleared due to an event that would happen
-	 * before the exit stage, eg. PTRACE_EVENT_EXEC for the exit
-	 * stage of execve(2).  */
 	if (tracee->seccomp == ENABLED && !tracee->sysexit_pending)
 	    tracee->restart_how = PTRACE_CONT;
 	else
 	    tracee->restart_how = PTRACE_SYSCALL;
     }
 
-    /* Not a signal-stop by default.  */
     signal = 0;
 
     if (WIFEXITED(tracee_status)) {
@@ -788,8 +628,6 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 	VERBOSE(tracee, 1,
 		"vpid %" PRIu64 ": terminated with signal %d",
 		tracee->vpid, WTERMSIG(tracee_status));
-	/* [ASDroid] shell convention (128+sig) instead of a mute 255, and say so
-	 * for crash-type signals even without -v.  */
 	if (tracee->vpid == 1) {
 	    int sig = WTERMSIG(tracee_status);
 	    last_exit_status = 128 + sig;
@@ -800,8 +638,6 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 	}
 	terminate_tracee(tracee);
     } else if (WIFSTOPPED(tracee_status)) {
-	/* Don't use WSTOPSIG() to extract the signal
-	 * since it clears the PTRACE_EVENT_* bits. */
 	signal = (tracee_status & 0xfff00) >> 8;
 
 	switch (signal) {
@@ -817,26 +653,16 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 		     PTRACE_O_TRACEEXEC |
 		     PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT);
 
-		/* Distinguish some events from others and
-		 * automatically trace each new process with
-		 * the same options.
-		 *
-		 * Note that only the first bare SIGTRAP is
-		 * related to the tracing loop, others SIGTRAP
-		 * carry tracing information because of
-		 * TRACE*FORK/CLONE/EXEC.  */
 		if (deliver_sigtrap)
-		    break;	/* Deliver this signal as-is.  */
+		    break;
 
 		deliver_sigtrap = true;
 
-		/* Try to enable seccomp mode 2...  */
 		status =
 		    ptrace(PTRACE_SETOPTIONS, tracee->pid,
 			   NULL,
 			   default_ptrace_options | PTRACE_O_TRACESECCOMP);
 		if (status < 0) {
-		    /* ... otherwise use default options only.  */
 		    status =
 			ptrace(PTRACE_SETOPTIONS,
 			       tracee->pid, NULL, default_ptrace_options);
@@ -852,24 +678,17 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 	case SIGTRAP | 0x80:
 	    signal = 0;
 
-	    /* This tracee got signaled then freed during the
-	       sysenter stage but the kernel reports the sysexit
-	       stage; just discard this spurious tracee/event.  */
 	    if (tracee->exe == NULL) {
-		tracee->restart_how = PTRACE_CONT;	/* SYSCALL OR CONT */
+		tracee->restart_how = PTRACE_CONT;
 		return 0;
 	    }
 
 	    switch (tracee->seccomp) {
 	    case ENABLED:
 		if (IS_IN_SYSENTER(tracee)) {
-		    /* sysenter: ensure the sysexit
-		     * stage will be hit under seccomp.  */
 		    tracee->restart_how = PTRACE_SYSCALL;
 		    tracee->sysexit_pending = true;
 		} else {
-		    /* sysexit: the next sysenter
-		     * will be notified by seccomp.  */
 		    tracee->restart_how = PTRACE_CONT;
 		    tracee->sysexit_pending = false;
 		}
@@ -877,7 +696,6 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 	    case DISABLED:
 		translate_syscall(tracee);
 
-		/* This syscall has disabled seccomp.  */
 		if (tracee->seccomp == DISABLING) {
 		    tracee->restart_how = PTRACE_SYSCALL;
 		    tracee->seccomp = DISABLED;
@@ -886,9 +704,6 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 		break;
 
 	    case DISABLING:
-		/* Seccomp was disabled by the
-		 * previous syscall, but its sysenter
-		 * stage was already handled.  */
 		tracee->seccomp = DISABLED;
 		if (IS_IN_SYSENTER(tracee))
 		    tracee->status = 1;
@@ -909,8 +724,6 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 		    seccomp_detected = true;
 		}
 
-		/* Use the common ptrace flow if seccomp was
-		 * explicitely disabled for this tracee.  */
 		if (tracee->seccomp != ENABLED)
 		    break;
 
@@ -919,21 +732,14 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 		if (status < 0)
 		    break;
 
-		/* Use the common ptrace flow when
-		 * sysexit has to be handled.  */
 		if ((flags & FILTER_SYSEXIT) != 0) {
 		    tracee->restart_how = PTRACE_SYSCALL;
 		    break;
 		}
 
-		/* Otherwise, handle the sysenter
-		 * stage right now.  */
 		tracee->restart_how = PTRACE_CONT;
 		translate_syscall(tracee);
 
-		/* This syscall has disabled seccomp, so move
-		 * the ptrace flow back to the common path to
-		 * ensure its sysexit will be handled.  */
 		if (tracee->seccomp == DISABLING)
 		    tracee->restart_how = PTRACE_SYSCALL;
 		break;
@@ -957,15 +763,11 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 	    break;
 
 	case SIGSTOP:
-	    /* Stop this tracee until PRoot has received
-	     * the EVENT_*FORK|CLONE notification.  */
 	    if (tracee->exe == NULL) {
 		tracee->sigstop = SIGSTOP_PENDING;
 		signal = -1;
 	    }
 
-	    /* For each tracee, the first SIGSTOP
-	     * is only used to notify the tracer.  */
 	    if (tracee->sigstop == SIGSTOP_IGNORED) {
 		tracee->sigstop = SIGSTOP_ALLOWED;
 		signal = 0;
@@ -973,42 +775,30 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 	    break;
 
 	case SIGSYS:
-	    /* [ASDroid] swallow Android seccomp SIGSYS.  */
 	    if (handle_android_sigsys(tracee))
 		signal = 0;
 	    break;
 
 	default:
-	    /* Deliver this signal as-is.  */
 	    break;
 	}
     }
 
-    /* Clear the pending event, if any.  */
     tracee->as_ptracee.event4.proot.pending = false;
 
     return signal;
 }
 
-
-/**
- * Restart the given @tracee with the specified @signal.  This
- * function returns false if the tracee was not restarted (error or
- * put in the "waiting for ptracee" state), otherwise true.
- */
 bool restart_tracee(Tracee *tracee, int signal)
 {
     int status;
 
-    /* Put in the "stopped"/"waiting for ptracee" state?.  */
     if (tracee->as_ptracer.wait_pid != 0 || signal == -1)
 	return false;
 
-    /* Restart the tracee and stop it at the next instruction, or
-     * at the next entry or exit of a system call. */
     status = ptrace(tracee->restart_how, tracee->pid, NULL, signal);
     if (status < 0)
-	return false;		/* The process likely died in a syscall.  */
+	return false;
 
     VERBOSE(tracee, 6,
 	    "vpid %" PRIu64 ": restarted using %d, signal %d",

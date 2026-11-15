@@ -8,57 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// GL 3.1's name-only half of the active-uniform query, on top of the ES call that
-// already returns the same string.
-//
-// It was a stub -- a no-op that wrote neither the name nor the length and, being a
-// stub rather than an error, left glGetError clean. Callers got whatever was
-// already in the buffer they passed.
-//
-// That is not a cosmetic gap. The standard way to build a name -> location map is
-// to walk the active uniforms by index and ask for each name, and a caller doing
-// that ended up with a map keyed on garbage: every later lookup missed, so the
-// uniforms never got set and kept whatever the driver had zero-initialised them
-// to. NeoForge's early loading window does exactly this, and a screenSize of
-// (0, 0) turned its every vertex into a division by zero -- gl_Position came out
-// non-finite, every primitive was discarded, and the window rendered black with
-// nothing anywhere reporting a problem.
-
 #include <regex.h>
 #include "GL/glext.h"
 #include "GLES3/gl32.h"

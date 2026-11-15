@@ -45,9 +45,6 @@ typedef struct {
     word_t length;
 } Sysnums;
 
-/**
- * Update @sysnums' fields with the sysnum table for the given @abi.
- */
 static void get_sysnums(Abi abi, Sysnums *sysnums)
 {
     switch (abi) {
@@ -67,7 +64,7 @@ static void get_sysnums(Abi abi, Sysnums *sysnums)
     case ABI_3:
 	sysnums->table = SYSNUMS_ABI3;
 	sysnums->length = sizeof(SYSNUMS_ABI3) / sizeof(Sysnum);
-	sysnums->offset = 0x40000000;	/* x32 */
+	sysnums->offset = 0x40000000;
 	return;
 #endif
     default:
@@ -75,9 +72,6 @@ static void get_sysnums(Abi abi, Sysnums *sysnums)
     }
 }
 
-/**
- * Return the neutral value of @sysnum from the given @abi.
- */
 static Sysnum translate_sysnum(Abi abi, word_t sysnum)
 {
     Sysnums sysnums;
@@ -85,28 +79,22 @@ static Sysnum translate_sysnum(Abi abi, word_t sysnum)
 
     get_sysnums(abi, &sysnums);
 
-    /* Sanity checks.  */
     if (sysnum < sysnums.offset)
 	return PR_void;
 
     index = sysnum - sysnums.offset;
 
-    /* Sanity checks.  */
     if (index > sysnums.length)
 	return PR_void;
 
     return sysnums.table[index];
 }
 
-/**
- * Return the architecture value of @sysnum for the given @abi.
- */
 word_t detranslate_sysnum(Abi abi, Sysnum sysnum)
 {
     Sysnums sysnums;
     size_t i;
 
-    /* Very special case.  */
     if (sysnum == PR_void)
 	return SYSCALL_AVOIDER;
 
@@ -122,29 +110,18 @@ word_t detranslate_sysnum(Abi abi, Sysnum sysnum)
     return SYSCALL_AVOIDER;
 }
 
-/**
- * Return the neutral value of the @tracee's current syscall number.
- */
 Sysnum get_sysnum(const Tracee *tracee, RegVersion version)
 {
     return translate_sysnum(get_abi(tracee),
 			    peek_reg(tracee, version, SYSARG_NUM));
 }
 
-/**
- * Overwrite the @tracee's current syscall number with @sysnum.  Note:
- * this neutral value is automatically converted into the architecture
- * value.
- */
 void set_sysnum(Tracee *tracee, Sysnum sysnum)
 {
     poke_reg(tracee, SYSARG_NUM,
 	     detranslate_sysnum(get_abi(tracee), sysnum));
 }
 
-/**
- * Return the human readable name of @sysnum.
- */
 const char *stringify_sysnum(Sysnum sysnum)
 {
 #define SYSNUM(item) [ PR_ ## item ] = #item,

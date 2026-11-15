@@ -1,8 +1,8 @@
-#include <sys/prctl.h>		/* prctl(2), PR_* */
-#include <linux/seccomp.h>	/* SECCOMP_MODE_FILTER, */
-#include <linux/filter.h>	/* struct sock_*, */
-#include <linux/audit.h>	/* AUDIT_ARCH_*, */
-#include <stddef.h>		/* offsetof(3), */
+#include <sys/prctl.h>
+#include <linux/seccomp.h>
+#include <linux/filter.h>
+#include <linux/audit.h>
+#include <stddef.h>
 
 int main(void)
 {

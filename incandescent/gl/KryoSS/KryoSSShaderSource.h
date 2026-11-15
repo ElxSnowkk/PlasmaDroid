@@ -26,21 +26,6 @@
 // Copyright (c) 2021-2023 Advanced Micro Devices, Inc. (FidelityFX FSR 1 EASU); MIT License.
 // Licenciado como o Incandescent: LGPL-2.1-only.
 
-// Constantes por modo (espelham LENPOW / WIDTHK em tests/kryoss_ref.py). Sem macros com argumento: alguns tradutores GLSL->ES nao as expandem.
-// kryossLen(coerencia) = "comprimento" da borda 0..1 (modo 1 usa c^2, os demais c);
-// kWidthK = alargamento extra do nucleo ao longo do gradiente (so o modo 0 precisa: 4 taps sao poucos).
-
-
-
-
-// Dither de ruido gradiente intercalado (Jimenez 2014), +-0.5 LSB de 8 bits. So no modo Qualidade.
-
-// Conjunto de 5 pontos (a=cima, b=esq, c=centro, d=dir, e=baixo) ponderado por w:
-// acumula o TENSOR de gradiente (gxx,gyy,gxy) e a "linearidade" (so degraus/rampas contam; picos e linhas finas nao).
-
-
-// Tap: Lanczos2 aproximado, eliptico, rotacionado para a direcao da borda.
-
 #pragma once
 
 const char* KRYOSS_FSBody = R"kryoss_glsl(

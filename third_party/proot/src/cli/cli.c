@@ -20,22 +20,21 @@
  * 02110-1301 USA.
  */
 
-#include <stdio.h>		/* printf(3), */
-#include <stdbool.h>		/* bool, true, false,  */
-#include <linux/limits.h>	/* ARG_MAX, PATH_MAX, */
-#include <string.h>		/* str*(3), */
-#include <libgen.h>		/* basename(3), */
-#include <talloc.h>		/* talloc*,  */
-#include <stdlib.h>		/* exit(3), EXIT_*, strtol(3), {g,s}etenv(3), */
-#include <assert.h>		/* assert(3),  */
-#include <sys/types.h>		/* getpid(2),  */
-#include <unistd.h>		/* getpid(2),  */
-#include <errno.h>		/* errno(3), */
-#include <limits.h>		/* INT_MAX, */
+#include <stdio.h>
+#include <stdbool.h>
+#include <linux/limits.h>
+#include <string.h>
+#include <libgen.h>
+#include <talloc.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <errno.h>
+#include <limits.h>
 
-/* execinfo.h is GNU extension, disable it not using glibc */
 #if defined(__GLIBC__)
-#include <execinfo.h>		/* backtrace_symbols(3), */
+#include <execinfo.h>
 #endif
 
 #include "cli/cli.h"
@@ -50,9 +49,6 @@
 
 #include "build.h"
 
-/**
- * Print a (@detailed) usage of PRoot.
- */
 void print_usage(Tracee *tracee, const Cli *cli, bool detailed)
 {
     const char *current_class = "none";
@@ -106,9 +102,6 @@ void print_usage(Tracee *tracee, const Cli *cli, bool detailed)
 	printf("%s\n", cli->colophon);
 }
 
-/**
- * Print the version of PRoot.
- */
 void print_version(const Cli *cli)
 {
     printf("%s\n\nPlasma Proot %s\nPatched For PlasmaDroid\n\n", cli->logo, cli->version);
@@ -131,7 +124,6 @@ static void print_execve_help(const Tracee *tracee, const char *argv0,
 {
     note(tracee, ERROR, SYSTEM, "execve(\"%s\")", argv0);
 
-    /* Ubuntu kernel bug?  */
     if (status == -EPERM && getenv("PROOT_NO_SECCOMP") == NULL) {
 	note(tracee, INFO, USER,
 	     "It seems your kernel contains this bug: https://bugs.launchpad.net/ubuntu/+source/linux/+bug/1202161\n"
@@ -211,17 +203,12 @@ static void print_config(Tracee *tracee, char *const argv[])
     notify_extensions(tracee, PRINT_CONFIG, 0, 0);
 }
 
-/**
- * Initialize @tracee's current working directory.  This function
- * returns -1 if an error occurred, otherwise 0.
- */
 static int initialize_cwd(Tracee *tracee)
 {
     char path2[PATH_MAX];
     char path[PATH_MAX];
     int status;
 
-    /* Compute the base directory.  */
     if (tracee->fs->cwd[0] != '/') {
 	status = getcwd2(tracee->reconf.tracee, path);
 	if (status < 0) {
@@ -231,16 +218,12 @@ static int initialize_cwd(Tracee *tracee)
     } else
 	strcpy(path, "/");
 
-    /* The ending "." ensures canonicalize() will report an error
-     * if tracee->fs->cwd does not exist or if it is not a
-     * directory.  */
     status = join_paths(3, path2, path, tracee->fs->cwd, ".");
     if (status < 0) {
 	note(tracee, ERROR, INTERNAL, "getcwd: %s", strerror(-status));
 	return -1;
     }
 
-    /* Initiale state for canonicalization.  */
     strcpy(path, "/");
 
     status = canonicalize(tracee, path2, true, path, 0);
@@ -253,23 +236,17 @@ static int initialize_cwd(Tracee *tracee)
     }
     chop_finality(path);
 
-    /* Replace with the canonicalized working directory.  */
     TALLOC_FREE(tracee->fs->cwd);
     tracee->fs->cwd = talloc_strdup(tracee->fs, path);
     if (tracee->fs->cwd == NULL)
 	return -1;
     talloc_set_name_const(tracee->fs->cwd, "$cwd");
 
-    /* Keep this special environment variable consistent.  */
     setenv("PWD", path, 1);
 
     return 0;
 }
 
-/**
- * Initialize @tracee->exe from @exe, i.e. canonicalize it from a
- * guest point-of-view.
- */
 static int initialize_exe(Tracee *tracee, const char *exe)
 {
     char path[PATH_MAX];
@@ -291,11 +268,6 @@ static int initialize_exe(Tracee *tracee, const char *exe)
     return 0;
 }
 
-/**
- * Configure @tracee according to the command-line arguments stored in
- * @argv[].  This function returns the index in @argv[] of the command
- * to launch, otherwise -1 if an error occured.
- */
 static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
 {
     option_handler_t handler = NULL;
@@ -306,21 +278,17 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
     int status;
 
     if (get_care_cli != NULL) {
-	/* Check if it's an self-extracting CARE archive.  */
 	status = extract_archive_from_file("/proc/self/exe");
 	if (status == 0) {
-	    /* Yes it is, nothing more to do.  */
 	    exit_failure = 0;
 	    return -1;
 	}
 
-	/* Check if it's a valid CARE tool name.  */
 	if (strncasecmp(basename(argv[0]), "care", strlen("care"))
 	    == 0)
 	    cli = get_care_cli(tracee->ctx);
     }
 
-    /* Unknown tool name?  Default to PRoot.  */
     if (cli == NULL)
 	cli = get_proot_cli(tracee->ctx);
     tracee->tool_name = cli->name;
@@ -333,7 +301,6 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
     for (i = 1; i < argc; i++) {
 	const char *arg = argv[i];
 
-	/* The current argument is the value of a short option.  */
 	if (handler != NULL) {
 	    status = handler(tracee, cli, arg);
 	    if (status < 0)
@@ -343,20 +310,18 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
 	}
 
 	if (arg[0] != '-')
-	    break;		/* End of PRoot options. */
+	    break;
 
 	options = cli->options;
 	for (j = 0; options[j].class != NULL; j++) {
 	    const Option *option = &options[j];
 
-	    /* A given option has several aliases.  */
 	    for (k = 0;; k++) {
 		const Argument *argument;
 		size_t length;
 
 		argument = &option->arguments[k];
 
-		/* End of aliases for this option.  */
 		if (!argument->name)
 		    break;
 
@@ -364,14 +329,12 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
 		if (strncmp(arg, argument->name, length) != 0)
 		    continue;
 
-		/* Avoid ambiguities.  */
 		if (strlen(arg) > length
 		    && arg[length] != argument->separator) {
 		    print_error_separator(tracee, argument);
 		    return -1;
 		}
 
-		/* No option value.  */
 		if (!argument->value) {
 		    status = option->handler(tracee, cli, NULL);
 		    if (status < 0)
@@ -379,7 +342,6 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
 		    goto known_option;
 		}
 
-		/* Value coalesced with to its option.  */
 		if (argument->separator == arg[length]) {
 		    assert(strlen(arg) >= length);
 		    status =
@@ -389,13 +351,11 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
 		    goto known_option;
 		}
 
-		/* Avoid ambiguities.  */
 		if (argument->separator != ' ') {
 		    print_error_separator(tracee, argument);
 		    return -1;
 		}
 
-		/* Short option with a separated value.  */
 		handler = option->handler;
 		goto known_option;
 	    }
@@ -425,8 +385,6 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
 
     HOOK_CONFIG(pre_initialize_bindings);
 
-    /* The guest rootfs is now known: bindings specified by the
-     * user (tracee->bindings.user) can be canonicalized.  */
     status = initialize_bindings(tracee);
     if (status < 0)
 	return -1;
@@ -434,9 +392,6 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
     HOOK_CONFIG(post_initialize_bindings);
     HOOK_CONFIG(pre_initialize_cwd);
 
-    /* Bindings are now installed (tracee->bindings.guest &
-     * tracee->bindings.host): the current working directory can
-     * be canonicalized.  */
     status = initialize_cwd(tracee);
     if (status < 0)
 	return -1;
@@ -444,9 +399,6 @@ static int parse_config(Tracee *tracee, size_t argc, char *const argv[])
     HOOK_CONFIG(post_initialize_cwd);
     HOOK_CONFIG(pre_initialize_exe);
 
-    /* Bindings are now installed and the current working
-     * directory is canonicalized: resolve path to @tracee->exe
-     * and configure @tracee->cmdline.  */
     status = initialize_exe(tracee, argv[argc_offset]);
     if (status < 0)
 	return -1;
@@ -466,32 +418,27 @@ int main(int argc, char *const argv[])
     Tracee *tracee;
     int status;
 
-    /* Configure the memory allocator.  */
     talloc_enable_leak_report();
 
 #if defined(TALLOC_VERSION_MAJOR) && TALLOC_VERSION_MAJOR >= 2
     talloc_set_log_stderr();
 #endif
 
-    /* Pre-create the first tracee (pid == 0).  */
     tracee = get_tracee(NULL, 0, true);
     if (tracee == NULL)
 	goto error;
     tracee->pid = getpid();
 
-    /* Pre-configure the first tracee.  */
     status = parse_config(tracee, argc, argv);
     if (status < 0)
 	goto error;
 
-    /* Start the first tracee.  */
     status = launch_process(tracee, &argv[status]);
     if (status < 0) {
 	print_execve_help(tracee, tracee->exe, status);
 	goto error;
     }
 
-    /* Start tracing the first tracee and all its children.  */
     exit(event_loop());
 
   error:
@@ -505,11 +452,6 @@ int main(int argc, char *const argv[])
 	exit(EXIT_SUCCESS);
 }
 
-/**
- * Convert @value into an integer, then put the result into
- * *@variable.  This function prints a warning and returns -1 if a
- * conversion error occured, otherwise it returns 0.
- */
 int parse_integer_option(const Tracee *tracee, int *variable,
 			 const char *value, const char *option)
 {
@@ -526,10 +468,6 @@ int parse_integer_option(const Tracee *tracee, int *variable,
     return 0;
 }
 
-/**
- * Expand the environment variable in front of @string, if any.  For
- * example, this function can expand "$HOME" or "$HOME/.ICEauthority".
- */
 const char *expand_front_variable(TALLOC_CTX *context, const char *string)
 {
     const char *suffix;
@@ -562,12 +500,6 @@ const char *expand_front_variable(TALLOC_CTX *context, const char *string)
     return expanded;
 }
 
-/* Here follows the support for GCC function instrumentation.  Build
- * with CFLAGS='-finstrument-functions -O0 -g' and LDFLAGS='-rdynamic'
- * to enable this mechanism.  */
-
-/* since we rely on GLIBC extensions, disable all of this code if
- * __GLIBC__ is not defined */
 #if defined(__GLIBC__)
 static int indent_level = 0;
 

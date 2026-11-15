@@ -24,11 +24,10 @@
 #define CARE_H
 
 #include <stdbool.h>
-#include <sys/queue.h>		/* STAILQ_*, */
+#include <sys/queue.h>
 
 #include "extension/care/archive.h"
 
-/* Generic item for a STAILQ list.  */
 typedef struct item {
     const void *load;
      STAILQ_ENTRY(item) link;
@@ -36,7 +35,6 @@ typedef struct item {
 
 typedef STAILQ_HEAD(list, item) List;
 
-/* CARE CLI configuration.  */
 typedef struct {
     const char *output;
     char *const *command;
@@ -51,7 +49,6 @@ typedef struct {
     int max_size;
 } Options;
 
-/* CARE internal configuration.  */
 typedef struct {
     struct Entry *entries;
     struct Entry *dentries;
@@ -77,4 +74,4 @@ typedef struct {
 extern Item *queue_item(TALLOC_CTX *context, List **list,
 			const char *value);
 
-#endif				/* CARE_H */
+#endif

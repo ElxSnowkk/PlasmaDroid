@@ -63,10 +63,6 @@ typedef struct load_statement LoadStatement;
 #define LOAD_STATEMENT_SIZE(statement, type) \
 	(sizeof((statement).action) + sizeof((statement).type))
 
-/* Don't use enum, since sizeof(enum) doesn't have to be equal to
- * sizeof(word_t).  Keep values in the same order as their respective
- * actions appear in loader.c to get a change GCC produces a jump
- * table.  */
 #define LOAD_ACTION_OPEN_NEXT		0
 #define LOAD_ACTION_OPEN		1
 #define LOAD_ACTION_MMAP_FILE		2
@@ -75,4 +71,4 @@ typedef struct load_statement LoadStatement;
 #define LOAD_ACTION_START_TRACED	5
 #define LOAD_ACTION_START		6
 
-#endif				/* SCRIPT */
+#endif

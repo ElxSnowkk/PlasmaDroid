@@ -1,12 +1,3 @@
-// dmabuf.cpp — zwp_linux_dmabuf_v1 v5 + zwp_linux_dmabuf_feedback_v1.
-//
-// v4+ deprecates the per-format `format`/`modifier` events on the dmabuf
-// global; clients call `get_default_feedback`/`get_surface_feedback` to get
-// a feedback object instead. We send: main_device → format_table memfd →
-// one tranche (target=main_device, all formats) → tranche_done → done.
-//
-// C07-05: wl_buffer creation uses deferred import — EGL image is built at
-// render time (when a Surface* is available), not at wl_buffer creation.
 
 #include "labwc.h"
 #include "egl_renderer.h"
@@ -34,23 +25,12 @@ extern "C" {
 
 extern State* g_state;
 
-// "No explicit modifier" sentinel (drm_fourcc.h). Stored on buffers created
-// without a modifier so the importer omits the EGL modifier attributes rather
-// than passing this (import-failing) value as a real modifier.
 static constexpr uint64_t DRM_FORMAT_MOD_INVALID = 0x00ffffffffffffffULL;
 
-// The wl_buffer implementation for dmabuf-backed buffers. File-scope so its
-// address is stable and usable as the wl_resource_instance_of discriminator.
 static const struct wl_buffer_interface g_dmabuf_buffer_impl = {
     [](wl_client*, wl_resource* r){ wl_resource_destroy(r); },
 };
 
-// C07-05: DmabufBuffer accessor. The tag check alone is NOT a safe type
-// discriminator — a wl_buffer of another kind (e.g. wp_single_pixel_buffer,
-// whose user_data's first word is client-controlled) can forge the tag and be
-// reinterpreted as a DmabufBuffer, reading a std::vector control block past the
-// end of a smaller struct (OOB read → dup()/close() of garbage fds → crash).
-// Gate on the actual wl_buffer implementation first.
 DmabufBuffer* dmabuf_buffer_from_resource(wl_resource* r) {
     if (!r) return nullptr;
     if (!wl_resource_instance_of(r, &wl_buffer_interface, &g_dmabuf_buffer_impl))
@@ -66,14 +46,12 @@ namespace {
 
 constexpr uint32_t DMABUF_VERSION = 5;
 
-// ---------- zwp_linux_buffer_params_v1 -------------------------------------
-
 struct Params {
     int width = 0, height = 0;
     uint32_t fourcc = 0, flags = 0;
     uint64_t modifier = 0;
-    bool modifier_set = false;       // v5+: track if modifier has been set
-    bool used = false;               // C07-03: track if create/create_immed called
+    bool modifier_set = false;
+    bool used = false;
     std::vector<int> fds;
     std::vector<uint32_t> offsets;
     std::vector<uint32_t> strides;
@@ -101,7 +79,6 @@ void params_add(wl_client*, wl_resource* r, int32_t fd, uint32_t plane_idx,
         p->strides.resize(plane_idx + 1, 0);
     }
 
-    // C07-02: error on duplicate plane with PLANE_SET code.
     if (p->fds[plane_idx] >= 0) {
         wl_resource_post_error(r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_SET,
                                "plane index %u already set", plane_idx);
@@ -110,7 +87,6 @@ void params_add(wl_client*, wl_resource* r, int32_t fd, uint32_t plane_idx,
     }
 
     uint64_t new_mod = (static_cast<uint64_t>(modifier_hi) << 32) | modifier_lo;
-    // v5+: all planes must use the same modifier.
     if (p->modifier_set && new_mod != p->modifier) {
         wl_resource_post_error(r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT,
                                "all planes must use the same modifier");
@@ -124,7 +100,6 @@ void params_add(wl_client*, wl_resource* r, int32_t fd, uint32_t plane_idx,
     p->modifier_set = true;
 }
 
-// C07-05: destroy callback for wl_buffer resources backed by DmabufBuffer.
 static void dmabuf_buffer_resource_destroy(wl_resource* r) {
     DmabufBuffer* db = static_cast<DmabufBuffer*>(wl_resource_get_user_data(r));
     if (!db) return;
@@ -138,7 +113,6 @@ void create_buffer_common(wl_client* c, wl_resource* r, uint32_t id,
     Params* p = params_from(r);
     if (!p) return;
 
-    // C07-03: enforce ALREADY_USED.
     if (p->used) {
         wl_resource_post_error(r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED,
                                "params object already used");
@@ -146,7 +120,6 @@ void create_buffer_common(wl_client* c, wl_resource* r, uint32_t id,
     }
     p->used = true;
 
-    // C07-07: validate completeness and format before creating the wl_buffer.
     if (p->fds.empty()) {
         if (immediate) {
             wl_resource_post_error(r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE,
@@ -166,8 +139,6 @@ void create_buffer_common(wl_client* c, wl_resource* r, uint32_t id,
         return;
     }
 
-    // A plane gap (e.g. plane 0 and 2 added, 1 left as -1) would hand a -1 fd
-    // to EGL_DMA_BUF_PLANE*_FD_EXT. Spec requires INCOMPLETE.
     for (size_t pi = 0; pi < p->fds.size(); ++pi) {
         if (p->fds[pi] < 0) {
             if (immediate) {
@@ -182,15 +153,11 @@ void create_buffer_common(wl_client* c, wl_resource* r, uint32_t id,
 
     p->width = w; p->height = h; p->fourcc = fourcc; p->flags = flags;
 
-    // C07-05: deferred import — store params + dup'd fds in DmabufBuffer.
-    // The EGL image is built at render time when a Surface* is available.
     auto* db = new DmabufBuffer();
     db->width    = w;
     db->height   = h;
     db->fourcc   = fourcc;
     db->flags    = flags;
-    // Preserve "implicit modifier" as INVALID so the importer omits the EGL
-    // modifier attrs rather than forcing LINEAR(0) on an implicit buffer.
     db->modifier = p->modifier_set ? p->modifier : DRM_FORMAT_MOD_INVALID;
     db->offsets  = p->offsets;
     db->strides  = p->strides;
@@ -198,7 +165,6 @@ void create_buffer_common(wl_client* c, wl_resource* r, uint32_t id,
         db->fds.push_back(fd >= 0 ? ::dup(fd) : -1);
     }
 
-    // C07-04: create the wl_buffer AFTER successful validation.
     wl_resource* buf = wl_resource_create(c, &wl_buffer_interface, 1,
                                           immediate ? id : 0);
     if (!buf) {
@@ -223,7 +189,6 @@ void params_create(wl_client* c, wl_resource* r, int32_t w, int32_t h,
 void params_create_immed(wl_client* c, wl_resource* r, uint32_t id,
                          int32_t w, int32_t h, uint32_t fourcc, uint32_t flags) {
     if (w <= 0 || h <= 0) {
-        // C07-07: INVALID_DIMENSIONS for create_immed.
         wl_resource_post_error(r, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_DIMENSIONS,
                                "invalid dimensions %dx%d", w, h);
         return;
@@ -245,8 +210,6 @@ void params_resource_destroy(wl_resource* r) {
     delete p;
 }
 
-// ---------- feedback object -------------------------------------------------
-
 void send_feedback(State* st, wl_resource* fb) {
     if (st->dmabuf_feedback_fd < 0) return;
     wl_array dev;
@@ -259,8 +222,6 @@ void send_feedback(State* st, wl_resource* fb) {
         static_cast<uint32_t>(st->dmabuf_feedback_size));
     zwp_linux_dmabuf_feedback_v1_send_tranche_target_device(fb, &dev);
 
-    // C07-01: spec-mandated event order:
-    //   tranche_target_device → tranche_flags → tranche_formats → tranche_done
     zwp_linux_dmabuf_feedback_v1_send_tranche_flags(fb, 0);
 
     wl_array idx;
@@ -282,13 +243,10 @@ const struct zwp_linux_dmabuf_feedback_v1_interface feedback_impl = {
     feedback_destroy,
 };
 
-// ---------- zwp_linux_dmabuf_v1 ---------------------------------------------
-
 void dmabuf_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 
 void dmabuf_create_params(wl_client* c, wl_resource* parent, uint32_t id) {
     auto* p = new Params();
-    // Child objects inherit the parent's bound version (Wayland convention).
     wl_resource* r = wl_resource_create(c, &zwp_linux_buffer_params_v1_interface,
                                         wl_resource_get_version(parent), id);
     if (!r) { delete p; wl_client_post_no_memory(c); return; }
@@ -307,7 +265,6 @@ void dmabuf_get_default_feedback(wl_client* c, wl_resource* parent, uint32_t id)
 
 void dmabuf_get_surface_feedback(wl_client* c, wl_resource* dmabuf_res, uint32_t id,
                                  wl_resource* surface_res) {
-    // C07-A1: validate surface_res before using it.
     if (!surface_res) {
         LOGW("get_surface_feedback: null surface resource");
     } else {
@@ -316,8 +273,6 @@ void dmabuf_get_surface_feedback(wl_client* c, wl_resource* dmabuf_res, uint32_t
             LOGW("get_surface_feedback: surface resource has null user_data");
         }
     }
-    // Per spec, surface-specific feedback falls back to default when per-surface
-    // feedback is not available (we don't have it yet).
     dmabuf_get_default_feedback(c, dmabuf_res, id);
 }
 
@@ -328,20 +283,14 @@ const struct zwp_linux_dmabuf_v1_interface dmabuf_impl = {
     dmabuf_get_surface_feedback,
 };
 
-void dmabuf_bind(wl_client* c, void* /*data*/, uint32_t version, uint32_t id) {
+void dmabuf_bind(wl_client* c, void* , uint32_t version, uint32_t id) {
     uint32_t v = version < DMABUF_VERSION ? version : DMABUF_VERSION;
     wl_resource* r = wl_resource_create(c, &zwp_linux_dmabuf_v1_interface, v, id);
     if (!r) { wl_client_post_no_memory(c); return; }
     wl_resource_set_implementation(r, &dmabuf_impl, nullptr, nullptr);
-    // v4+ clients use feedback objects, so the format/modifier events are
-    // deprecated for them. But v1–v3 clients learn supported formats ONLY from
-    // these events — without them an older client sees zero formats. Emit them.
     auto* st = g_state;
     if (v < 4 && st) {
         for (const auto& fm : st->dmabuf_formats) {
-            // v1 format event: advertise each format once (skip duplicates from
-            // multiple modifiers). INVALID modifier still implies the format is
-            // usable with an implicit modifier.
             zwp_linux_dmabuf_v1_send_format(r, fm.first);
             if (v >= 3 && fm.second != DRM_FORMAT_MOD_INVALID) {
                 zwp_linux_dmabuf_v1_send_modifier(r, fm.first,
@@ -353,13 +302,9 @@ void dmabuf_bind(wl_client* c, void* /*data*/, uint32_t version, uint32_t id) {
     LOGI("zwp_linux_dmabuf_v1 bound (version=%u)", v);
 }
 
-}  // namespace
+}
 
-// Build a minimal hardcoded format table when we have AHardwareBuffer import
-// but no vendor EGL dmabuf support. Advertises ABGR8888 with implicit modifier
-// (DRM_FORMAT_MOD_INVALID) so clients know what format to use.
 static bool build_ahwb_format_table(State* st) {
-    // DRM_FORMAT_ABGR8888 = 0x34324241 (matches AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM)
     constexpr uint32_t DRM_FORMAT_ABGR8888 = 0x34324241u;
     constexpr uint32_t DRM_FORMAT_XBGR8888 = 0x34324258u;
     constexpr uint32_t DRM_FORMAT_ARGB8888 = 0x34325241u;
@@ -371,7 +316,6 @@ static bool build_ahwb_format_table(State* st) {
         { DRM_FORMAT_XRGB8888, DRM_FORMAT_MOD_INVALID },
     };
 
-    // 16-byte record: u32 format, u8[4] pad, u64 modifier.
     size_t bytes = st->dmabuf_formats.size() * 16;
     int fd = static_cast<int>(syscall(SYS_memfd_create, "dmabuf-feedback-ahwb",
                                       MFD_CLOEXEC | MFD_ALLOW_SEALING));
@@ -401,20 +345,11 @@ static bool build_ahwb_format_table(State* st) {
 
 bool dmabuf_globals_register(State* st) {
     if (st->g_dmabuf) return true;
-    // O global é anunciado SEMPRE, mesmo no modo headless (sem renderer ainda).
-    // Antes ele só existia depois que um EglRenderer subia e declarava suporte a
-    // dma-buf/AHWB; clientes que conectam antes (ou num aparelho cuja string de
-    // extensões do EGL esconde EGL_EXT_image_dma_buf_import) nunca viam o global e
-    // o libhybris-wayland falhava com "o compositor nao anuncia zwp_linux_dmabuf_v1".
-    // A importação real continua sendo feita (e pode falhar com log) na hora de
-    // desenhar; aqui só garantimos que o cliente consegue criar buffers.
     if (!st->renderer) {
         LOGI("dmabuf: sem renderer ainda — anunciando o global com tabela padrão (modo headless)");
     } else if (!st->renderer->has_dmabuf_import() && !st->renderer->has_ahwb_import()) {
         LOGW("dmabuf: EGL sem import de dma-buf/AHWB declarado — anunciando mesmo assim (import será tentado em tempo de desenho)");
     }
-    // Tabela mínima para o feedback v4+ e para os eventos format/modifier de v1–v3.
-    // Se o renderer tiver tabela real (build_dmabuf_feedback_table) ela substitui esta.
     if (st->dmabuf_feedback_fd < 0) {
         build_ahwb_format_table(st);
     }

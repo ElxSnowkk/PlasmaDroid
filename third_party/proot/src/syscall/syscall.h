@@ -23,7 +23,7 @@
 #ifndef SYSCALL_H
 #define SYSCALL_H
 
-#include <limits.h>		/* PATH_MAX, */
+#include <limits.h>
 
 #include "tracee/tracee.h"
 #include "tracee/reg.h"
@@ -37,4 +37,4 @@ extern void translate_syscall(Tracee * tracee);
 extern int translate_syscall_enter(Tracee * tracee);
 extern void translate_syscall_exit(Tracee * tracee);
 
-#endif				/* SYSCALL_H */
+#endif

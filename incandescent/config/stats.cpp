@@ -8,18 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-
-// The whole file is one small JSON object so that a later counter can be added
-// without invalidating the ones already on disk. Unknown keys are carried over
-// on write for the same reason: an older library must not silently drop what a
-// newer one recorded.
-
-// Opt in, not out: this library gets loaded by benchmarks, by tools and by the
-// plugin app itself, and none of those is a game launch. Only a launcher that
-// says so counts.
-
 #include "stats.h"
 
 #include "../gl/envvars.h"

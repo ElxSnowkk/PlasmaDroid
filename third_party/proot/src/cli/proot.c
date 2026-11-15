@@ -20,10 +20,10 @@
  * 02110-1301 USA.
  */
 
-#include <string.h>		/* str*(3), */
-#include <assert.h>		/* assert(3), */
-#include <stdio.h>		/* printf(3), fflush(3), */
-#include <unistd.h>		/* write(2), */
+#include <string.h>
+#include <assert.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include "cli/cli.h"
 #include "cli/note.h"
@@ -31,7 +31,6 @@
 #include "path/binding.h"
 #include "attribute.h"
 
-/* These should be included last.  */
 #include "build.h"
 #include "cli/proot.h"
 
@@ -40,8 +39,6 @@ static int handle_option_r(Tracee *tracee, const Cli *cli UNUSED,
 {
     Binding *binding;
 
-    /* ``chroot $PATH`` is semantically equivalent to ``mount
-     * --bind $PATH /``.  */
     binding = new_binding(tracee, value, "/", true);
     if (binding == NULL)
 	return -1;
@@ -84,19 +81,15 @@ static int handle_option_q(Tracee *tracee, const Cli *cli UNUSED,
     while (1) {
 	nb_args++;
 
-	/* Keep consecutive non-space characters.  */
 	while (*ptr != ' ' && *ptr != '\0')
 	    ptr++;
 
-	/* End-of-string ?  */
 	if (*ptr == '\0')
 	    break;
 
-	/* Skip consecutive space separators.  */
 	while (*ptr == ' ' && *ptr != '\0')
 	    ptr++;
 
-	/* End-of-string ?  */
 	if (*ptr == '\0')
 	    break;
     }
@@ -113,21 +106,17 @@ static int handle_option_q(Tracee *tracee, const Cli *cli UNUSED,
 	const void *end;
 	last = true;
 
-	/* Keep consecutive non-space characters.  */
 	start = ptr;
 	while (*ptr != ' ' && *ptr != '\0')
 	    ptr++;
 	end = ptr;
 
-	/* End-of-string ?  */
 	if (*ptr == '\0')
 	    goto next;
 
-	/* Remove consecutive space separators.  */
 	while (*ptr == ' ' && *ptr != '\0')
 	    ptr++;
 
-	/* End-of-string ?  */
 	if (*ptr == '\0')
 	    goto next;
 
@@ -364,9 +353,6 @@ static int handle_option_l(Tracee *tracee, const Cli *cli UNUSED,
     return initialize_extension(tracee, link2symlink_callback, NULL);
 }
 
-/**
- * Initialize @tracee->qemu.
- */
 static int post_initialize_exe(Tracee *tracee, const Cli *cli UNUSED,
 			       size_t argc UNUSED,
 			       char *const argv[]UNUSED,
@@ -375,20 +361,15 @@ static int post_initialize_exe(Tracee *tracee, const Cli *cli UNUSED,
     char path[PATH_MAX];
     int status;
 
-    /* Nothing else to do ?  */
     if (tracee->qemu == NULL)
 	return 0;
 
-    /* Resolve the full guest path to tracee->qemu[0].  */
     status =
 	which(tracee->reconf.tracee, tracee->reconf.paths, path,
 	      tracee->qemu[0]);
     if (status < 0)
 	return -1;
 
-    /* Actually tracee->qemu[0] has to be a host path from the tracee's
-     * point-of-view, not from the PRoot's point-of-view.  See
-     * translate_execve() for details.  */
     if (tracee->reconf.tracee != NULL) {
 	status = detranslate_path(tracee->reconf.tracee, path, NULL);
 	if (status < 0)
@@ -402,24 +383,18 @@ static int post_initialize_exe(Tracee *tracee, const Cli *cli UNUSED,
     return 0;
 }
 
-/**
- * Initialize @tracee's fields that are mandatory for PRoot but that
- * are not required on the command line, i.e.  "-w" and "-r".
- */
 static int pre_initialize_bindings(Tracee *tracee, const Cli *cli,
 				   size_t argc UNUSED,
 				   char *const argv[]UNUSED, size_t cursor)
 {
     int status;
 
-    /* Default to "." if no CWD were specified.  */
     if (tracee->fs->cwd == NULL) {
 	status = handle_option_w(tracee, cli, ".");
 	if (status < 0)
 	    return -1;
     }
 
-    /* The default guest rootfs is "/" if none was specified.  */
     if (get_root(tracee) == NULL) {
 	status = handle_option_r(tracee, cli, "/");
 	if (status < 0)

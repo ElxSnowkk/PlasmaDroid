@@ -43,4 +43,4 @@ extern int compare_xpointee_env(ArrayOfXPointers * envp, size_t index,
 
 extern bool is_env_name(const char *variable, const char *name);
 
-#endif				/* LDSO_H */
+#endif

@@ -1,4 +1,3 @@
-// activation.cpp — xdg_activation_v1 minimal implementation.
 #include "labwc.h"
 extern "C" {
 #include "xdg-activation-v1-protocol.h"
@@ -12,7 +11,6 @@ extern "C" {
 extern State* g_state;
 static constexpr uint32_t ACT_VERSION = 1;
 
-// Track generated tokens (token_string → valid) for validation in act_activate.
 static std::unordered_map<std::string, bool> g_valid_tokens;
 
 static void token_set_serial(wl_client*, wl_resource*, uint32_t, wl_resource*) {}
@@ -20,20 +18,14 @@ static void token_set_app_id(wl_client*, wl_resource*, const char*) {}
 static void token_set_surface(wl_client*, wl_resource*, wl_resource*) {}
 static void token_commit(wl_client* c, wl_resource* r) {
     State* st = g_state;
-    // Generate a unique token from the display serial.
     uint32_t serial = st ? wl_display_next_serial(st->display) : 0u;
     char token_buf[64];
     snprintf(token_buf, sizeof(token_buf), "piperella-activation-%u", serial);
     std::string token(token_buf);
-    // C04-13: evict oldest entry when map is full to bound memory usage.
     if (g_valid_tokens.size() >= 64)
         g_valid_tokens.erase(g_valid_tokens.begin());
     g_valid_tokens[token] = true;
     xdg_activation_token_v1_send_done(r, token.c_str());
-    // C04-12: do NOT destroy r here — xdg_activation_token_v1 is a client-owned
-    // object; the client must call destroy when done. Calling wl_resource_destroy
-    // here caused a UAF when the client subsequently issued its own destroy request.
-    // The token_destroy handler below handles the actual resource teardown.
     LOGI("activation token committed: %s", token_buf);
 }
 static void token_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
@@ -51,41 +43,34 @@ static void act_activate(wl_client* client, wl_resource*, const char* token, wl_
     State* st = g_state;
     if (!st || !surf_res) return;
 
-    // C04-A4: activation of a surface owned by a different client is rejected.
     if (wl_resource_get_client(surf_res) != client) {
         LOGI("xdg_activation: cross-client activation rejected (token=%s)",
              token ? token : "(null)");
         return;
     }
 
-    // Validate token.
     bool token_valid = (token && g_valid_tokens.find(std::string(token)) != g_valid_tokens.end());
     if (!token_valid) {
         LOGI("xdg_activation: ignoring activation with unknown/invalid token \"%s\"",
              token ? token : "(null)");
         return;
     }
-    // Consume the token (one-time use per spec).
     g_valid_tokens.erase(std::string(token));
 
     Surface* s = static_cast<Surface*>(wl_resource_get_user_data(surf_res));
     if (!s) return;
     std::lock_guard<std::mutex> g(st->scene_mutex);
 
-    // Find the toplevel owning this surface (MW1).
     Toplevel* tl = nullptr;
     for (auto& t : st->toplevels) {
         if (t->surface == s) { tl = t.get(); break; }
     }
 
     if (tl) {
-        // Use the shared keyboard focus logic (sends enter/leave, manages flag).
         compositor_set_keyboard_focus(st, tl);
         LOGI("xdg_activation: focused toplevel pid=%d app_id=\"%s\" title=\"%s\" (token=%s)",
              tl->client_pid, tl->app_id.c_str(), tl->title.c_str(), token);
     } else {
-        // Fallback: just update surface-level focus without a toplevel.
-        // Use resources vector (KeyboardState stores multiple wl_keyboard bindings).
         if (!st->seat.kbd.resources.empty()) {
             uint32_t serial = wl_display_next_serial(st->display);
             if (st->seat.kbd.focus) {

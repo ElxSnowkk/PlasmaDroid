@@ -39,5 +39,4 @@ extern int restart_original_syscall(Tracee * tracee);
 
 extern void chain_next_syscall(Tracee * tracee);
 
-
-#endif				/* CHAIN_H */
+#endif

@@ -94,13 +94,11 @@ typedef union {
     ProgramHeader64 class64;
 } ProgramHeader;
 
-/* Object type:  */
 #define ET_REL          1
 #define ET_EXEC         2
 #define ET_DYN          3
 #define ET_CORE         4
 
-/* Segment flags:  */
 #define PF_X 1
 #define PF_W 2
 #define PF_R 4
@@ -133,25 +131,21 @@ typedef enum {
     DT_RUNPATH = 29
 } DynamicType;
 
-/* The following macros are also compatible with ELF 64-bit. */
 #define ELF_IDENT(header, index) (header).class32.e_ident[(index)]
 #define ELF_CLASS(header) ELF_IDENT(header, 4)
 #define IS_CLASS32(header) (ELF_CLASS(header) == 1)
 #define IS_CLASS64(header) (ELF_CLASS(header) == 2)
 
-/* Helper to access a @field of the structure ElfHeaderXX. */
 #define ELF_FIELD(header, field)		\
 	(IS_CLASS64(header)			\
 	 ? (header).class64. e_ ## field	\
 	 : (header).class32. e_ ## field)
 
-/* Helper to access a @field of the structure ProgramHeaderXX */
 #define PROGRAM_FIELD(ehdr, phdr, field)	\
 	(IS_CLASS64(ehdr)			\
 	 ? (phdr).class64. p_ ## field		\
 	 : (phdr).class32. p_ ## field)
 
-/* Helper to access a @field of the structure DynamicEntryXX */
 #define DYNAMIC_FIELD(ehdr, dynent, field)	\
 	(IS_CLASS64(ehdr)			\
 	 ? (dynent).class64. d_ ## field	\
@@ -179,4 +173,4 @@ extern int iterate_program_headers(const Tracee * tracee, int fd,
 				   program_headers_iterator_t callback,
 				   void *data);
 
-#endif				/* ELF_H */
+#endif

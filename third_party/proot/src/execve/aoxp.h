@@ -93,4 +93,4 @@ extern int compare_xpointee_generic(ArrayOfXPointers * array, size_t index,
 extern int sizeof_xpointee_as_string(ArrayOfXPointers * array,
 				     size_t index);
 
-#endif				/* AOXP_H */
+#endif

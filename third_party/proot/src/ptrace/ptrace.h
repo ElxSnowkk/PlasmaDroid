@@ -33,4 +33,4 @@ extern void detach_from_ptracer(Tracee * ptracee);
 #define PTRACEE (ptracee->as_ptracee)
 #define PTRACER (ptracer->as_ptracer)
 
-#endif				/* PTRACE_H */
+#endif

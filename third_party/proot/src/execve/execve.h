@@ -23,7 +23,7 @@
 #ifndef EXECVE_H
 #define EXECVE_H
 
-#include <linux/limits.h>	/* PATH_MAX, */
+#include <linux/limits.h>
 
 #include "tracee/tracee.h"
 #include "execve/elf.h"
@@ -63,4 +63,4 @@ typedef struct load_info {
 		&& peek_reg((tracee), ORIGINAL, SYSARG_5) == (word_t) 3	\
 		&& peek_reg((tracee), ORIGINAL, SYSARG_6) == (word_t) 4)
 
-#endif				/* EXECVE_H */
+#endif

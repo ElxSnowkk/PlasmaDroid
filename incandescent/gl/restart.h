@@ -8,32 +8,6 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // End of Source File Header
 
-
-
-// ---------------------------------------------------------------------------
-// GL_PRIMITIVE_RESTART emulation
-//
-// GL 4.6 has two restart features and GLES only has one of them:
-//
-//   GL_PRIMITIVE_RESTART_FIXED_INDEX  the restart value is fixed at the largest
-//                                     value the index type can hold. GLES 3.0+
-//                                     has this, so it forwards unchanged.
-//   GL_PRIMITIVE_RESTART              the restart value is whatever
-//                                     glPrimitiveRestartIndex set. GLES has no
-//                                     equivalent at all.
-//
-// The second is emulated by rewriting the index stream: every index equal to the
-// application's chosen value becomes 0xFFFFFFFF, the stream is drawn as
-// GL_UNSIGNED_INT, and the driver's fixed-index restart is switched on for the
-// duration of the draw.
-//
-// Widening to 32 bits is what makes the substitution unambiguous. An 8- or
-// 16-bit source cannot contain 0xFFFFFFFF, so no ordinary index can be mistaken
-// for a restart. A 32-bit source could in principle contain it, but that would
-// mean addressing vertex 4294967295, so the collision is not reachable in
-// practice.
-// ---------------------------------------------------------------------------
-
 #ifndef INCANDESCENT_RESTART_H
 #define INCANDESCENT_RESTART_H
 

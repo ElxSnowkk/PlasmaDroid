@@ -41,11 +41,7 @@ On first launch, the setup screen asks for file access, notification access and 
 
 ## Sharing the desktop
 
-Open Settings and choose "Share desktop" to stream the screen. On a computer you can view it with:
-
-```
-python3 tools/plasma_receiver.py IP PIN | ffplay -fflags nobuffer -f h264 -i -
-```
+Open Settings and choose "Share desktop" to stream the screen.
 
 ## Status
 

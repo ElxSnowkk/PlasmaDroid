@@ -20,22 +20,22 @@
  * 02110-1301 USA.
  */
 
-#include <sys/types.h>		/* off_t */
-#include <sys/user.h>		/* struct user*, */
-#include <sys/ptrace.h>		/* ptrace(2), PTRACE*, */
-#include <assert.h>		/* assert(3), */
-#include <errno.h>		/* errno(3), */
-#include <stddef.h>		/* offsetof(), */
-#include <stdint.h>		/* *int*_t, */
-#include <inttypes.h>		/* PRI*, */
-#include <limits.h>		/* ULONG_MAX, */
-#include <string.h>		/* memcpy(3), */
-#include <sys/uio.h>		/* struct iovec, */
+#include <sys/types.h>
+#include <sys/user.h>
+#include <sys/ptrace.h>
+#include <assert.h>
+#include <errno.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <limits.h>
+#include <string.h>
+#include <sys/uio.h>
 
 #include "arch.h"
 
 #if defined(ARCH_ARM64)
-#include <linux/elf.h>		/* NT_PRSTATUS */
+#include <linux/elf.h>
 #endif
 
 #include "syscall/sysnum.h"
@@ -44,9 +44,6 @@
 #include "cli/note.h"
 #include "compat.h"
 
-/**
- * Compute the offset of the register @reg_name in the USER area.
- */
 #define USER_REGS_OFFSET(reg_name)			\
 	(offsetof(struct user, regs)			\
 	 + offsetof(struct user_regs_struct, reg_name))
@@ -54,8 +51,6 @@
 #define REG(tracee, version, index)			\
 	(*(word_t*) (((uint8_t *) &tracee->_regs[version]) + reg_offset[index]))
 
-/* Specify the ABI registers (syscall argument passing, stack pointer).
- * See sysdeps/unix/sysv/linux/${ARCH}/syscall.S from the GNU C Library. */
 #if defined(ARCH_X86_64)
 
 static off_t reg_offset[] = {
@@ -171,9 +166,6 @@ static off_t reg_offset[] = {
 
 #endif
 
-/**
- * Return the *cached* value of the given @tracees' @reg.
- */
 word_t peek_reg(const Tracee *tracee, RegVersion version, Reg reg)
 {
     word_t result;
@@ -182,17 +174,12 @@ word_t peek_reg(const Tracee *tracee, RegVersion version, Reg reg)
 
     result = REG(tracee, version, reg);
 
-    /* Use only the 32 least significant bits (LSB) when running
-     * 32-bit processes on a 64-bit kernel.  */
     if (is_32on64_mode(tracee))
 	result &= 0xFFFFFFFF;
 
     return result;
 }
 
-/**
- * Set the *cached* value of the given @tracees' @reg.
- */
 void poke_reg(Tracee *tracee, Reg reg, word_t value)
 {
     if (peek_reg(tracee, CURRENT, reg) == value)
@@ -202,10 +189,6 @@ void poke_reg(Tracee *tracee, Reg reg, word_t value)
     tracee->_regs_were_changed = true;
 }
 
-/**
- * Print the value of the current @tracee's registers according
- * to the @verbose_level.  Note: @message is mixed to the output.
- */
 void print_current_regs(Tracee *tracee, int verbose_level,
 			const char *message)
 {
@@ -229,14 +212,8 @@ void print_current_regs(Tracee *tracee, int verbose_level,
 	 get_abi(tracee));
 }
 
-/**
- * Save the @tracee's current register bank into the @version register
- * bank.
- */
 void save_current_regs(Tracee *tracee, RegVersion version)
 {
-    /* Optimization: don't restore original register values if
-     * they were never changed.  */
     if (version == ORIGINAL)
 	tracee->_regs_were_changed = false;
 
@@ -244,11 +221,6 @@ void save_current_regs(Tracee *tracee, RegVersion version)
 	   sizeof(tracee->_regs[CURRENT]));
 }
 
-/**
- * Copy all @tracee's general purpose registers into a dedicated
- * cache.  This function returns -errno if an error occured, 0
- * otherwise.
- */
 int fetch_regs(Tracee *tracee)
 {
     int status;
@@ -270,26 +242,12 @@ int fetch_regs(Tracee *tracee)
     return 0;
 }
 
-/**
- * Copy the cached values of all @tracee's general purpose registers
- * back to the process, if necessary.  This function returns -errno if
- * an error occured, 0 otherwise.
- */
 int push_regs(Tracee *tracee)
 {
     int status;
 
     if (tracee->_regs_were_changed) {
-	/* At the very end of a syscall, with regard to the
-	 * entry, only the result register can be modified by
-	 * PRoot.  */
 	if (tracee->restore_original_regs) {
-	    /* Restore the sysarg register only if it is
-	     * not the same as the result register.  Note:
-	     * it's never the case on x86 architectures,
-	     * so don't make this check, otherwise it
-	     * would introduce useless complexity because
-	     * of the multiple ABI support.  */
 #if defined(ARCH_X86) || defined(ARCH_X86_64)
 #define		RESTORE(sysarg)	(REG(tracee, CURRENT, sysarg) = REG(tracee, ORIGINAL, sysarg))
 #else
@@ -311,9 +269,6 @@ int push_regs(Tracee *tracee)
 	struct iovec regs;
 	word_t current_sysnum = REG(tracee, CURRENT, SYSARG_NUM);
 
-	/* Update syscall number if needed.  On arm64, a new
-	 * subcommand has been added to PTRACE_{S,G}ETREGSET
-	 * to allow write/read of current sycall number.  */
 	if (current_sysnum != REG(tracee, ORIGINAL, SYSARG_NUM)) {
 	    regs.iov_base = &current_sysnum;
 	    regs.iov_len = sizeof(current_sysnum);
@@ -325,16 +280,12 @@ int push_regs(Tracee *tracee)
 		     "can't set the syscall number");
 	}
 
-	/* Update other registers.  */
 	regs.iov_base = &tracee->_regs[CURRENT];
 	regs.iov_len = sizeof(tracee->_regs[CURRENT]);
 
 	status = ptrace(PTRACE_SETREGSET, tracee->pid, NT_PRSTATUS, &regs);
 #else
 #if defined(ARCH_ARM_EABI)
-	/* On ARM, a special ptrace request is required to
-	 * change effectively the syscall number during a
-	 * ptrace-stop.  */
 	word_t current_sysnum = REG(tracee, CURRENT, SYSARG_NUM);
 	if (current_sysnum != REG(tracee, ORIGINAL, SYSARG_NUM)) {
 	    status =

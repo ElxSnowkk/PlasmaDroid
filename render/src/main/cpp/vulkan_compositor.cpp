@@ -423,11 +423,6 @@ private:
         ci.imageArrayLayers = 1;
         ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        // O compositor trabalha em coordenadas LÓGICAS (cena do Compose, gl_FragCoord, shaders sem rotação).
-        // Com preTransform = currentTransform (ROTATE_90/270 em paisagem num painel retrato) o Android espera a
-        // imagem em orientação nativa (extent trocado); sem pré-rotação a camada saía girada 90° e esticada
-        // (vidros/sombras "fantasma" em lugar errado, corte no meio e composição por GPU lenta).
-        // IDENTITY + extent lógico = o sistema aplica a rotação corretamente.
         if ((caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) == 0)
             return fail("Surface Vulkan sem suporte a preTransform IDENTITY");
         ci.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
@@ -942,8 +937,6 @@ private:
         return true;
     }
 
-    // Com preTransform IDENTITY numa tela rotacionada o Android devolve VK_SUBOPTIMAL_KHR em TODO present.
-    // Só vale recriar a swapchain se o tamanho lógico da Surface realmente mudou.
     bool surfaceExtentChanged() {
         VkSurfaceCapabilitiesKHR caps{};
         if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, surface, &caps) != VK_SUCCESS) return false;
@@ -1040,16 +1033,13 @@ private:
         int consecutiveResizeFailures = 0;
         std::vector<float> cachedWindows;
         uint64_t localSceneGen = 0;
-        Clock::time_point lastWall{};  // epoch: o primeiro frame sempre desenha o papel de parede
+        Clock::time_point lastWall{};
         while (running.load()) {
             Config cfg;
             uint64_t windowsGeneration = 0;
             bool redrawWall = false;
             {
                 std::unique_lock<std::mutex> lock(stateMutex);
-                // Acorda na hora quando a cena (janelas/popups) muda; o papel de parede animado é redesenhado
-                // só no ritmo do fpsCap. Antes o loop dormia o orçamento inteiro do frame e a cena de vidro
-                // chegava com atraso (fantasma ao arrastar janelas).
                 for (;;) {
                     if (!running.load()) break;
                     const auto now = Clock::now();

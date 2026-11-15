@@ -1,6 +1,3 @@
-// cursor_shape.cpp — wp_cursor_shape_manager_v1 v1 minimal implementation.
-// Allows clients to set the cursor shape using an enum (CSS cursor names)
-// instead of providing a wl_surface. Commonly used by GTK/Electron apps.
 #include "labwc.h"
 extern "C" {
 #include "cursor-shape-protocol.h"
@@ -14,7 +11,6 @@ static constexpr uint32_t CS_VERSION = 1;
 
 static void cs_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 static void cs_set_shape(wl_client*, wl_resource* r, uint32_t serial, uint32_t shape) {
-    // Validate shape enum.
     uint32_t cli_ver = wl_resource_get_version(r);
     if (!wp_cursor_shape_device_v1_shape_is_valid(shape, cli_ver)) {
         wl_resource_post_error(r, WP_CURSOR_SHAPE_DEVICE_V1_ERROR_INVALID_SHAPE,
@@ -32,14 +28,14 @@ static const struct wp_cursor_shape_device_v1_interface cs_impl = {
 
 static void mgr_destroy(wl_client*, wl_resource* r) { wl_resource_destroy(r); }
 static void mgr_get_pointer(wl_client* c, wl_resource*, uint32_t id,
-                              wl_resource* /*pointer*/) {
+                              wl_resource* ) {
     wl_resource* r = wl_resource_create(c, &wp_cursor_shape_device_v1_interface,
                                          CS_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }
     wl_resource_set_implementation(r, &cs_impl, nullptr, nullptr);
 }
 static void mgr_get_tablet_tool_v2(wl_client* c, wl_resource*, uint32_t id,
-                                    wl_resource* /*tablet_tool*/) {
+                                    wl_resource* ) {
     wl_resource* r = wl_resource_create(c, &wp_cursor_shape_device_v1_interface,
                                          CS_VERSION, id);
     if (!r) { wl_client_post_no_memory(c); return; }
@@ -50,7 +46,6 @@ static const struct wp_cursor_shape_manager_v1_interface mgr_impl = {
 };
 
 static void mgr_bind(wl_client* c, void*, uint32_t ver, uint32_t id) {
-    // C20-15: STUB — accepts set_shape requests but cursor appearance is not changed.
     LOGI("wp_cursor_shape_manager_v1 bound (client %p, ver %u) — stub: shape not applied", (void*)c, ver);
     wl_resource* r = wl_resource_create(c, &wp_cursor_shape_manager_v1_interface,
                                          ver < CS_VERSION ? ver : CS_VERSION, id);
