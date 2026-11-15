@@ -1,0 +1,14 @@
+prefix=/home/yassine/Piperella-Wayland-Compositor/android/src/main/cpp/prebuilts/arm64-v8a
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+datarootdir=${prefix}/share
+pkgdatadir=${pc_sysrootdir}${datarootdir}/wayland
+
+Name: Wayland Client
+Description: Wayland client side library
+Version: 1.24.0
+Requires.private: libffi
+Libs: -L${libdir} -lwayland-client -lm
+Libs.private: -pthread
+Cflags: -I${includedir}

@@ -1,0 +1,10 @@
+prefix=/home/yassine/Piperella-Wayland-Compositor/android/src/main/cpp/prebuilts/arm64-v8a
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: Wayland Cursor
+Description: Wayland cursor helper library
+Version: 1.24.0
+Requires.private: wayland-client
+Libs: -L${libdir} -lwayland-cursor
+Cflags: -I${includedir}

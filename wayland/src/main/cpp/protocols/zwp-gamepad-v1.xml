@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="gamepad_unstable_v1">
+
+  <copyright>
+    Copyright © 2024 Yassine Koubry
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="gamepad input device">
+    Protocol for exposing gamepad/controller input events to Wayland clients.
+
+    A global interface that notifies clients about connected gamepad devices
+    and delivers button and axis state changes. Each gamepad is identified by
+    a device ID.
+
+    Warning! The protocol described in this file is experimental and backward
+    incompatible changes may be made. Backward compatible changes may be added
+    together with the corresponding interface version bump. Backward
+    incompatible changes are done by bumping the version number in the protocol
+    and interface names and resetting the interface version. Once the protocol
+    is to be declared stable, the 'z' prefix and the version number in the
+    protocol and interface names are removed and the interface version number is
+    reset.
+  </description>
+
+  <interface name="zwp_gamepad_manager_v1" version="1">
+    <description summary="gamepad device manager">
+      The global interface exposing gamepad device enumeration and events.
+      A client binds this interface to receive gamepad connection,
+      disconnection, button, and axis events.
+
+      Gamepad events are delivered in batches delimited by a frame event.
+      Clients should defer processing until they receive a frame event.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the gamepad manager">
+        Destroy the gamepad manager. Any gamepad objects created through
+        this manager remain valid until the corresponding gamepad_removed
+        event is received.
+      </description>
+    </request>
+
+    <event name="gamepad_added">
+      <description summary="a gamepad was connected">
+        Notifies the client that a gamepad device has been connected.
+        The client can expect button and axis events for this device id.
+      </description>
+      <arg name="id" type="uint" summary="unique device identifier"/>
+      <arg name="name" type="string" summary="device name string"/>
+      <arg name="num_buttons" type="uint" summary="number of buttons"/>
+      <arg name="num_axes" type="uint" summary="number of axes"/>
+    </event>
+
+    <event name="gamepad_removed">
+      <description summary="a gamepad was disconnected">
+        Notifies the client that a gamepad device has been disconnected.
+        The device id is no longer valid.
+      </description>
+      <arg name="id" type="uint" summary="device identifier"/>
+    </event>
+
+    <event name="gamepad_button">
+      <description summary="gamepad button state change">
+        Notifies the client about a gamepad button press or release.
+        Button indices are 0-based and follow the standard Xbox layout:
+        0=A, 1=B, 2=X, 3=Y, 4=LB, 5=RB, 6=LT, 7=RT,
+        8=Back, 9=Start, 10=LS, 11=RS,
+        12=DUp, 13=DDown, 14=DLeft, 15=DRight, 16=Home
+      </description>
+      <arg name="id" type="uint" summary="device identifier"/>
+      <arg name="btn" type="uint" summary="button index"/>
+      <arg name="value" type="uint" summary="0=released, non-zero=pressed"/>
+    </event>
+
+    <event name="gamepad_axis">
+      <description summary="gamepad axis state change">
+        Notifies the client about a gamepad analog axis value.
+        Axis indices are 0-based:
+        0=LX (left stick X), 1=LY (left stick Y),
+        2=RX (right stick X), 3=RY (right stick Y),
+        4=LT (left trigger), 5=RT (right trigger),
+        6=HAT_X (d-pad X), 7=HAT_Y (d-pad Y)
+
+        Values are normalized to [-1.0, 1.0], except triggers which are [0.0, 1.0].
+      </description>
+      <arg name="id" type="uint" summary="device identifier"/>
+      <arg name="axis" type="uint" summary="axis index"/>
+      <arg name="value" type="fixed" summary="axis value in wayland fixed-point"/>
+    </event>
+
+    <event name="gamepad_frame">
+      <description summary="end of gamepad event batch">
+        Indicates the end of a set of gamepad events that occurred
+        simultaneously. Clients should process all pending state changes
+        on receipt of this event.
+      </description>
+      <arg name="id" type="uint" summary="device identifier"/>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+    </event>
+  </interface>
+</protocol>

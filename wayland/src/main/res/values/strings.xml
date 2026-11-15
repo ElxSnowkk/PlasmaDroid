@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Piperella Compositor</string>
+    <!-- C19-14: Updated per Google Play AccessibilityService policy — must disclose that
+         keystrokes are captured and forwarded. See:
+         https://support.google.com/googleplay/android-developer/answer/10964491 -->
+    <string name="accessibility_service_description">Hardware keyboard input is captured and forwarded to Wayland compositor clients. This enables keyboard use within the Wayland session (e.g., Steam, Wine). No screen content or personal data is collected beyond keystrokes.</string>
+</resources>

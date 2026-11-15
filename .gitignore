@@ -1,0 +1,67 @@
+# Build e artefatos
+build/
+dist/
+.gradle/
+.idea/
+.kotlin/
+.cxx/
+local.properties
+*.apk
+*.aab
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+
+# Chaves de assinatura
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+
+# Backups e restos de merge
+*.bak
+*.bak_*
+*.bak-*
+*.orig
+*.rej
+*.old
+*.tmp
+*.swp
+*~
+
+# Patches
+*.patch
+*.diff
+patches/
+patches-aplicados/
+
+# Scripts, docs e testes (fora do repositório)
+scripts/
+docs/
+tests/
+tools/
+APLICAR.txt
+aplicar_correcoes_*.py
+build-wrapper-bionic.txt
+atualizar-e-compilar.sh
+setup-termux-build.sh
+clean_env.sh
+
+# Terceiros pesados (baixar à parte)
+third_party/bionic-vulkan-wrapper/
+third_party/android-headers/
+third_party/waylandie-vulkan-reference/
+incandescent/3rdparty/
+incandescent/include/
+incandescent/external/
+incandescent/bench/
+
+# Tarballs (o runtime é gerado pelo build, não versionado)
+*.tar
+*.tar.gz
+*.tgz
+*.tar.xz
+PlasmaDroid/
