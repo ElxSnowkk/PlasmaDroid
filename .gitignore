@@ -65,3 +65,6 @@ incandescent/bench/
 *.tgz
 *.tar.xz
 PlasmaDroid/
+
+# Script de upload (so local)
+upload.sh
