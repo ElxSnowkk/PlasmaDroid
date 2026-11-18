@@ -131,7 +131,7 @@ uniform samplerExternalOES u_tex;
 out vec4 frag_color;
 )" HDR_GLSL R"(
 void main() {
-    frag_color = hdr_map(texture(u_tex, v_uv));
+    frag_color = hdr_map(vec4(texture(u_tex, v_uv).rgb, 1.0));
 })";
 
 const float* buffer_transform_uv_matrix(int transform) {

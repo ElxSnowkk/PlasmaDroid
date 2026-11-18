@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -53,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.plasma.app.session.DesktopSession
+import org.plasma.app.session.linuxKickoffCategory
 import org.plasma.app.session.MenuItem
 import org.plasma.app.session.MenuState
 import org.plasma.core.Keys
@@ -62,6 +47,7 @@ private val TOOLS = listOf("tool:files", "tool:terminal", "tool:settings", "tool
 private val KICKOFF_CATEGORIES = listOf(
     "Favoritos" to "star",
     "Todos os aplicativos" to "list",
+    "Linux" to "terminal",
     "Desenvolvimento" to "terminal",
     "Jogos" to "chip",
     "Gráficos" to "palette",
@@ -79,20 +65,24 @@ fun Kickoff(session: DesktopSession, modifier: Modifier) {
     st.watch()
     val b = LocalBreeze.current
     val apps by session.app.apps.collectAsState()
+    val linuxApps by session.app.linuxApps.apps.collectAsState()
     var query by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("Favoritos") }
     val favs = st.list(Keys.FAVS, "tool:files,tool:terminal,tool:settings")
-    val all = remember(apps) { TOOLS + apps.map { "app:${it.pkg}" } }
-    val results = remember(query, apps) {
+    val all = remember(apps, linuxApps) { TOOLS + apps.map { "app:${it.pkg}" } + linuxApps.map { "linux:${it.id}" } }
+    LaunchedEffect(Unit) { session.app.linuxApps.requestRefresh(0) }
+    val results = remember(query, apps, linuxApps) {
         if (query.isBlank()) emptyList()
         else all.filter { entryLabel(it, apps).contains(query.trim(), ignoreCase = true) }
     }
-    val selected = remember(category, apps, favs, all) {
+    val selected = remember(category, apps, linuxApps, favs, all) {
         when (category) {
             "Favoritos" -> favs
             "Todos os aplicativos" -> all
+            "Linux" -> all.filter { it.startsWith("linux:") }
             else -> all.filter { id ->
                 if (id.startsWith("tool:")) kickoffToolCategory(id) == category
+                else if (id.startsWith("linux:")) linuxApps.firstOrNull { "linux:${it.id}" == id }?.let { linuxKickoffCategory(it) == category } == true
                 else apps.firstOrNull { it.pkg == id.removePrefix("app:") }?.let { kickoffAppCategory(it.pkg, it.label) == category } == true
             }
         }
@@ -128,7 +118,7 @@ fun Kickoff(session: DesktopSession, modifier: Modifier) {
             }
             Box(
                 Modifier.width(230.dp).clip(RoundedCornerShape(5.dp))
-                    .background(b.view.copy(alpha = .85f)).border(1.dp, b.line, RoundedCornerShape(5.dp))
+                    .background(b.view.mul(.85f)).border(1.dp, b.line, RoundedCornerShape(5.dp))
                     .padding(horizontal = 9.dp, vertical = 8.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -151,43 +141,75 @@ fun Kickoff(session: DesktopSession, modifier: Modifier) {
             }
         }
 
-        Row(Modifier.weight(1f).fillMaxWidth().background(b.view.copy(alpha = .48f))) {
-            Column(
-                Modifier.width(166.dp).fillMaxHeight().background(b.window.copy(alpha = .48f))
-                    .verticalScroll(rememberScrollState()).padding(vertical = 6.dp, horizontal = 5.dp),
-            ) {
-                KICKOFF_CATEGORIES.forEach { (label, icon) ->
-                    val active = query.isBlank() && category == label
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 1.dp).clip(RoundedCornerShape(4.dp))
-                            .background(if (active) b.accent.copy(alpha = .22f) else Color.Transparent)
-                            .clickable { category = label; query = "" }
-                            .padding(horizontal = 8.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        BreezeIcon(icon, 15.dp, if (active) b.accent else b.dim)
-                        T(label, 11.sp, if (active) b.text else b.dim,
-                            if (active) FontWeight.SemiBold else null,
-                            Modifier.padding(start = 9.dp), maxLines = 1)
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().background(b.view.mul(.48f))) {
+
+            val compact = maxWidth < 520.dp
+            val entries = if (query.isNotBlank()) results else selected
+            val grid: @Composable (Modifier) -> Unit = { m ->
+                Box(m.padding(5.dp)) {
+                    if (entries.isEmpty()) {
+                        T(
+                            if (query.isNotBlank()) "Nenhum aplicativo encontrado."
+                            else "Nenhum aplicativo nesta categoria.",
+                            12.sp, b.dim, modifier = Modifier.align(Alignment.Center),
+                        )
+                    } else {
+                        EntryGrid(session, entries, apps, favs)
                     }
                 }
             }
-            Box(Modifier.weight(1f).fillMaxHeight().padding(5.dp)) {
-                val entries = if (query.isNotBlank()) results else selected
-                if (entries.isEmpty()) {
-                    T(
-                        if (query.isNotBlank()) "Nenhum aplicativo encontrado."
-                        else "Nenhum aplicativo nesta categoria.",
-                        12.sp, b.dim, modifier = Modifier.align(Alignment.Center),
-                    )
-                } else {
-                    EntryGrid(session, entries, apps, favs)
+            if (compact) {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().background(b.window.mul(.48f)).horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 5.dp, vertical = 5.dp),
+                    ) {
+                        KICKOFF_CATEGORIES.forEach { (label, icon) ->
+                            val active = query.isBlank() && category == label
+                            Row(
+                                Modifier.padding(horizontal = 2.dp).clip(RoundedCornerShape(16.dp))
+                                    .background(if (active) b.accent.copy(alpha = .22f) else Color.Transparent)
+                                    .clickable { category = label; query = "" }
+                                    .padding(horizontal = 11.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BreezeIcon(icon, 15.dp, if (active) b.accent else b.dim)
+                                T(label, 11.sp, if (active) b.text else b.dim,
+                                    if (active) FontWeight.SemiBold else null, Modifier.padding(start = 7.dp), maxLines = 1)
+                            }
+                        }
+                    }
+                    grid(Modifier.weight(1f).fillMaxWidth())
+                }
+            } else {
+                Row(Modifier.fillMaxSize()) {
+                    Column(
+                        Modifier.width(166.dp).fillMaxHeight().background(b.window.mul(.48f))
+                            .verticalScroll(rememberScrollState()).padding(vertical = 6.dp, horizontal = 5.dp),
+                    ) {
+                        KICKOFF_CATEGORIES.forEach { (label, icon) ->
+                            val active = query.isBlank() && category == label
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = 1.dp).clip(RoundedCornerShape(4.dp))
+                                    .background(if (active) b.accent.copy(alpha = .22f) else Color.Transparent)
+                                    .clickable { category = label; query = "" }
+                                    .padding(horizontal = 8.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BreezeIcon(icon, 15.dp, if (active) b.accent else b.dim)
+                                T(label, 11.sp, if (active) b.text else b.dim,
+                                    if (active) FontWeight.SemiBold else null,
+                                    Modifier.padding(start = 9.dp), maxLines = 1)
+                            }
+                        }
+                    }
+                    grid(Modifier.weight(1f).fillMaxHeight())
                 }
             }
         }
 
         Row(
-            Modifier.fillMaxWidth().background(b.window.copy(alpha = .72f)).padding(horizontal = 6.dp, vertical = 3.dp),
+            Modifier.fillMaxWidth().background(b.window.mul(.72f)).padding(horizontal = 6.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             FooterAction("Configurações") { session.openTool("settings") }
@@ -227,7 +249,7 @@ private fun FooterAction(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun EntryGrid(session: DesktopSession, ids: List<String>, apps: List<org.plasma.bridge.AndroidApp>, favs: List<String>) {
-    LazyVerticalGrid(GridCells.Adaptive(96.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
+    LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize(), contentPadding = PaddingValues(4.dp)) {
         items(ids, key = { it }) { id ->
             Column(
                 Modifier.padding(2.dp).breezeClickable(6.dp) { openById(session, id) }
@@ -237,7 +259,7 @@ private fun EntryGrid(session: DesktopSession, ids: List<String>, apps: List<org
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 EntryIcon(id, U.iconL)
-                T(entryLabel(id, apps), 12.sp, maxLines = 2, align = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+                T(entryLabel(id, apps), 11.sp, maxLines = 2, align = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }

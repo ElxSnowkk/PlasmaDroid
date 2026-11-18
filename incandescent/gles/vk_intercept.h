@@ -1,5 +1,3 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
 #ifndef INCANDESCENT_VK_INTERCEPT_H_
 #define INCANDESCENT_VK_INTERCEPT_H_

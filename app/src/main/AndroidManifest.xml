@@ -59,6 +59,7 @@
 
         <activity
             android:name=".DesktopActivity"
+            android:screenOrientation="sensorLandscape"
             android:exported="true"
             android:resizeableActivity="true"
             android:launchMode="standard"

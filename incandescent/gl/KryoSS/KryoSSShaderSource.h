@@ -1,30 +1,5 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
-// KryoSS v4 (KryLabs) - gl/KryoSS/KryoSSShaderSource.h
-// GERADO por tools/gen_kryoss_header.py a partir de native/kryoss/kryoss_upsample.frag. NAO EDITE A MAO.
-// Contem trechos MIT da AMD (EASU do FidelityFX FSR 1). Licenciado como o Incandescent: LGPL-2.1-only.
-// O texto NAO inclui '#version' nem '#define KRYOSS_MODE': FSR1.cpp os injeta (ver KryoSSSource()).
 
-// KryoSS v4 (KryLabs) - upscaler ESPACIAL de passe unico. Usa so a cor do frame:
-// sem vetores de movimento, profundidade ou historico (nada temporal).
-// Base: reconstrucao direcional do EASU do AMD FidelityFX FSR 1 (MIT), portada do KryoSS v2/v3 (tests/kryoss_ref.py).
-// v4 = v3 + TENSOR DE ESTRUTURA no lugar da soma assinada do EASU (ver docs/KRYOSS.md):
-//   - sem cancelamento de sinal: cantos de xadrez / bordas opostas deixam de virar "ponto cinza" (sela);
-//   - orientacao = autovetor principal do tensor (sem trigonometria), coerencia = (l1-l2)/(l1+l2).
-//
-//   KRYOSS_MODE 0 = Ultra Desempenho : 4 taps  (2x2),  tensor do proprio 2x2
-//   KRYOSS_MODE 1 = Desempenho       : 8 taps  (2x2 + 4 bracos), 2 conjuntos
-//   KRYOSS_MODE 2 = Balanceado       : 12 taps (EASU completo, 4 conjuntos) + nitidez adaptativa
-//   KRYOSS_MODE 3 = Qualidade        : 12 taps + sobre-passo controlado + dither
-//
-// KRYOSS_MODE e definido pelo C++ (FSR1.cpp) antes da compilacao; uKryoss/uKryoss2 sao calculados em
-// gl/KryoSS/KryoSSParams.h (uma vez, no link do programa).
-// Uniformes de entrada iguais aos do FSR1 do Incandescent: uInputTex, uConst0, uViewportSize.
-// Nao usa gl_FragCoord para AMOSTRAR (o FSR1 original usa) e nao usa textureGather (so texelFetch).
-//
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. (FidelityFX FSR 1 EASU); MIT License.
-// Licenciado como o Incandescent: LGPL-2.1-only.
 
 #pragma once
 

@@ -1,4 +1,3 @@
-// Parte do projeto PlasmaDroid.
 
 package org.plasma.app.wayland
 
@@ -189,7 +188,6 @@ class WaylandSessionManager(context: Context) {
     fun clientEnvironment(x11: Boolean = false): Map<String, String> =
         if (x11) mapOf(
             "XDG_RUNTIME_DIR" to guestRuntimePath,
-            "WAYLAND_DISPLAY" to "wayland-0",
             "DISPLAY" to ":0",
             "XDG_SESSION_TYPE" to "x11",
             "GDK_BACKEND" to "x11",
@@ -341,6 +339,18 @@ class WaylandSessionManager(context: Context) {
             val current = handle
             if (current != 0L) runCatching { onRender(Unit) { NativeWaylandBridge.nativeResize(current, width, height) } }
         }
+    }
+
+    @Volatile private var pendingW = 0
+    @Volatile private var pendingH = 0
+    private val pendingResize = Runnable { resizeSurface(pendingW, pendingH) }
+
+    fun requestOutputSize(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        pendingW = width
+        pendingH = height
+        renderHandler.removeCallbacks(pendingResize)
+        renderHandler.postDelayed(pendingResize, 150L)
     }
 
     fun detachSurface() {

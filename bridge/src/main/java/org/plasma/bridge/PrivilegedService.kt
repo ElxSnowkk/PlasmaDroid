@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.bridge
 
@@ -67,11 +51,21 @@ class PrivilegedService : IPrivilegedService.Stub() {
     private fun shellContext(): Context {
         fake?.let { return it }
         val at = Class.forName("android.app.ActivityThread")
-        val ctor = at.getDeclaredConstructor().also { it.isAccessible = true }
-        val inst = ctor.newInstance()
-        at.getDeclaredField("sCurrentActivityThread").apply { isAccessible = true; set(null, inst) }
-        at.getDeclaredField("mSystemThread").apply { isAccessible = true; setBoolean(inst, true) }
-        val sys = at.getDeclaredMethod("getSystemContext").invoke(inst) as Context
+        val thread: Any = runCatching {
+            at.getDeclaredMethod("systemMain").also { it.isAccessible = true }.invoke(null)!!
+        }.getOrElse { first ->
+            PlasmaLog.w("shizuku", "systemMain falhou (${describe(first)}); montando o ActivityThread manualmente")
+            val inst = at.getDeclaredConstructor().also { it.isAccessible = true }.newInstance()
+            runCatching {
+                at.getDeclaredMethod("attach", Boolean::class.javaPrimitiveType, Long::class.javaPrimitiveType)
+                    .also { it.isAccessible = true }.invoke(inst, true, 0L)
+            }.recoverCatching {
+                at.getDeclaredMethod("attach", Boolean::class.javaPrimitiveType).also { it.isAccessible = true }.invoke(inst, true)
+            }.getOrThrow()
+            at.getDeclaredField("sCurrentActivityThread").apply { isAccessible = true; set(null, inst) }
+            inst
+        }
+        val sys = at.getDeclaredMethod("getSystemContext").also { it.isAccessible = true }.invoke(thread) as Context
         return FakeContext(sys).also { fake = it }
     }
 
@@ -83,26 +77,78 @@ class PrivilegedService : IPrivilegedService.Stub() {
             try { out = block() } catch (t: Throwable) { failure = t } finally { latch.countDown() }
         }
         if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) { err = "timeout"; return null }
-        failure?.let { err = "${it.javaClass.simpleName}: ${it.message}"; return null }
+        failure?.let { err = describe(it); return null }
         return out
+    }
+
+    private fun rootCause(t: Throwable): Throwable {
+        var c = t
+        while (true) {
+            val n = (c as? java.lang.reflect.InvocationTargetException)?.targetException ?: c.cause ?: return c
+            if (n === c) return c
+            c = n
+        }
+    }
+
+    private fun describe(t: Throwable): String {
+        val r = rootCause(t)
+        return "${r.javaClass.simpleName}: ${r.message}"
+    }
+
+    private fun displayManager(): DisplayManager {
+        val ctx = shellContext()
+        val failures = ArrayList<String>()
+        try {
+            val ctor = DisplayManager::class.java.getDeclaredConstructor(Context::class.java).also { it.isAccessible = true }
+            return ctor.newInstance(ctx)
+        } catch (t: Throwable) { failures += "ctor: ${describe(t)}" }
+        try {
+            (ctx.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.let { return it }
+        } catch (t: Throwable) { failures += "getSystemService: ${describe(t)}" }
+        try {
+            val sys = (ctx as? ContextWrapper)?.baseContext?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            if (sys != null) return sys
+        } catch (t: Throwable) { failures += "base: ${describe(t)}" }
+        error("DisplayManager indisponível (${failures.joinToString("; ")})")
     }
 
     override fun createDisplay(name: String, width: Int, height: Int, dpi: Int, surface: Surface, flags: Int): Int {
         err = ""
-        return onWorker {
-            val ctor = DisplayManager::class.java.getDeclaredConstructor(Context::class.java).also { it.isAccessible = true }
-            val dm = ctor.newInstance(shellContext())
-            val vd = dm.createVirtualDisplay(name, width, height, dpi, surface, flags)
-                ?: error("createVirtualDisplay retornou null")
-            val id = vd.display.displayId
-            displays[id] = vd
-            id
-        } ?: -1
+        val ladder = LinkedHashSet<Int>()
+        ladder += flags
+        ladder += flags and DisplayFlags.OWN_FOCUS.inv()
+        ladder += flags and (DisplayFlags.OWN_FOCUS or DisplayFlags.ALWAYS_UNLOCKED or DisplayFlags.TOUCH_FEEDBACK_DISABLED).inv()
+        ladder += flags and (DisplayFlags.OWN_FOCUS or DisplayFlags.ALWAYS_UNLOCKED or DisplayFlags.TOUCH_FEEDBACK_DISABLED or
+            DisplayFlags.OWN_DISPLAY_GROUP).inv()
+        ladder += flags and (DisplayFlags.OWN_FOCUS or DisplayFlags.ALWAYS_UNLOCKED or DisplayFlags.TOUCH_FEEDBACK_DISABLED or
+            DisplayFlags.OWN_DISPLAY_GROUP or DisplayFlags.TRUSTED).inv()
+        val errors = ArrayList<String>()
+        for (f in ladder) {
+            val id = onWorker {
+                val dm = displayManager()
+                val vd = dm.createVirtualDisplay(name, width, height, dpi, surface, f)
+                    ?: error("createVirtualDisplay retornou null")
+                val did = vd.display.displayId
+                displays[did] = vd
+                did
+            }
+            if (id != null && id > 0) {
+                if (f != flags) PlasmaLog.w("shizuku", "display criado com flags reduzidas 0x${f.toString(16)} (pedido 0x${flags.toString(16)}); erros: $errors")
+                err = ""
+                return id
+            }
+            errors += "0x${f.toString(16)}: $err"
+        }
+        err = errors.joinToString(" | ")
+        return -1
     }
 
     override fun releaseDisplay(displayId: Int) {
         displays.remove(displayId)?.let { runCatching { it.release() } }
-        inputHandler.post { streams.keys.removeAll { (it shr 32).toInt() == displayId } }
+        inputHandler.post {
+            streams.keys.removeAll { (it shr 32).toInt() == displayId }
+            verifiedAt.remove(displayId); rejectStreak.remove(displayId); shellSince.remove(displayId)
+        }
     }
     override fun resizeDisplay(displayId: Int, width: Int, height: Int, dpi: Int) { displays[displayId]?.resize(width, height, dpi) }
     override fun setDisplaySurface(displayId: Int, surface: Surface) { displays[displayId]?.surface = surface }
@@ -380,7 +426,7 @@ class PrivilegedService : IPrivilegedService.Stub() {
                     ev.addBatch(tk, coordsAt(k), 0)
                 }
             }
-            val needVerify = action == MotionEvent.ACTION_DOWN && !hover && now - (verifiedAt[displayId] ?: 0L) > PLASMA_PROBE_INTERVAL_MS
+            val needVerify = action == MotionEvent.ACTION_DOWN && !hover && verifiedAt[displayId] == null
             if (needVerify) {
                 val r = injectProbed(ev, displayId)
                 verifiedAt[displayId] = now

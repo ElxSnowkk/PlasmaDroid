@@ -1,4 +1,3 @@
-// Parte do projeto PlasmaDroid.
 
 package org.plasma.app.ui
 
@@ -39,7 +38,7 @@ internal fun GraphicsEnvironmentSection(session: DesktopSession, modifier: Modif
     Column(modifier.fillMaxWidth()) {
         SectionTitle(GRAPHICS_ENV_TITLE)
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(b.view.copy(alpha = .68f))
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(b.view.mul(.68f))
                 .border(1.dp, b.line, RoundedCornerShape(9.dp)).padding(12.dp),
         ) {
             if (krStep != null) {
@@ -94,7 +93,7 @@ internal fun VulkanDriverPicker(session: DesktopSession, busy: Boolean, installe
     val injected = remember(ver) { st.string(Keys.VK_INJECTED_BIONIC, "") }
 
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(b.view.copy(alpha = .68f))
+        modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(b.view.mul(.68f))
             .border(1.dp, b.line, RoundedCornerShape(9.dp)).padding(12.dp),
     ) {
         T("Driver Vulkan", 13.sp, weight = FontWeight.SemiBold)
@@ -137,7 +136,7 @@ private fun AngleSwitch(session: DesktopSession, installed: Boolean, settingsVer
     val on = remember(settingsVer) { st.bool(Keys.GL_ANGLE, false) }
 
     LaunchedEffect(installed, on) { if (installed && PlasmaVKSupport.angleEnabled(rootfs) != on) PlasmaVKSupport.setAngle(rootfs, on) }
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(9.dp)).background(b.view.copy(alpha = .68f))
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(9.dp)).background(b.view.mul(.68f))
         .border(1.dp, b.line, RoundedCornerShape(9.dp)).padding(horizontal = 12.dp, vertical = 6.dp)) {
         SwitchRow(
             "Usar ANGLE no OpenGL", on,
@@ -158,7 +157,7 @@ private fun WsiSwitch(session: DesktopSession, busy: Boolean, installed: Boolean
     val b = LocalBreeze.current
     val scope = rememberCoroutineScope()
     val on = remember(settingsVer) { st.bool(Keys.VK_WSI_DMABUF, false) }
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(9.dp)).background(b.view.copy(alpha = .68f))
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(9.dp)).background(b.view.mul(.68f))
         .border(1.dp, b.line, RoundedCornerShape(9.dp)).padding(horizontal = 12.dp, vertical = 6.dp)) {
         SwitchRow(
             "Apresentar Vulkan por dma-buf", on,

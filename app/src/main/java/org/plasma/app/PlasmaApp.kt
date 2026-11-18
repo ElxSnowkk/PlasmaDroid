@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app
 
@@ -62,6 +46,8 @@ class PlasmaApp : Application() {
     lateinit var controls: SystemControls
     lateinit var debian: DebianEnvironment
     lateinit var wayland: WaylandSessionManager
+    lateinit var x11: org.plasma.x11.X11Server
+    lateinit var linuxApps: org.plasma.app.session.LinuxAppCatalog
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _apps = MutableStateFlow<List<AndroidApp>>(emptyList())
@@ -87,13 +73,20 @@ class PlasmaApp : Application() {
         vdHost = VirtualDisplayHost(this)
         debian = DebianEnvironment(this, ProotPaths(filesDir, File(applicationInfo.nativeLibraryDir)))
         wayland = WaylandSessionManager(this)
+        x11 = org.plasma.x11.X11Server()
+        linuxApps = org.plasma.app.session.LinuxAppCatalog(this)
         sessions = SessionRegistry(this)
         PlasmaVKSupport.driverPreference = settings.string(Keys.VK_DRIVER, "auto").let { if (it == "injected_bionic") it else "auto" }
         PlasmaVKSupport.wsiDmabuf = settings.bool(Keys.VK_WSI_DMABUF, false)
 
         appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { PlasmaVKSupport.initialize(this@PlasmaApp, debian.paths) }; runCatching { org.plasma.proot.SysVShm.installClient(this@PlasmaApp, debian.paths.rootfs) } }
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { debian.ensurePiAppsRuns() } }
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { debian.reconcile() } }
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { debian.ensureFexHost() } }
         shizuku.start()
         displays.start()
+        linuxApps.start()
+        appScope.launch { debian.ui.collect { linuxApps.requestRefresh(0) } }
         appScope.launch {
             try {
                 _apps.value = catalog.load()

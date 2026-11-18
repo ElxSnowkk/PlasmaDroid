@@ -68,3 +68,4 @@ PlasmaDroid/
 
 # Script de upload (so local)
 upload.sh
+strip-comments.py

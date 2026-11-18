@@ -1,3 +1,4 @@
+#version 450
 /*
  * This file belongs to the PlasmaDroid project.
  *
@@ -15,7 +16,6 @@
  * PARTICULAR PURPOSE. See the GNU General Public License for more details.
  */
 
-#version 450
 layout(location = 0) flat in vec4 vRect;
 layout(location = 1) flat in vec4 vP0;
 layout(location = 2) flat in vec4 vP1;

@@ -1,22 +1,5 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
-// KryoSS v4 compute (KryLabs) - gl/KryoSS/KryoSSComputeSource.h
-// GERADO por tools/gen_kryoss_header.py a partir de native/kryoss/kryoss_upsample.comp. NAO EDITE A MAO.
-// Contem trechos MIT da AMD (EASU do FidelityFX FSR 1). Licenciado como o Incandescent: LGPL-2.1-only.
-// O texto NAO inclui '#version 310 es' nem '#define KRYOSS_MODE': FSR1.cpp os injeta.
 
-// KryoSS v4 COMPUTE (KryLabs) - mesma matematica do kryoss_upsample.frag, em compute shader (GLES 3.1).
-// Ganhos (estruturais, NAO medidos em GPU):
-//   - cada tile de 16x16 pixels de saida carrega os texels de entrada UMA vez na memoria compartilhada
-//     (~1,6 leituras/pixel em vez de 12 texelFetch) e calcula o tensor de estrutura UMA vez por celula de entrada
-//     (~1,6 conjuntos/pixel em vez de 4 + 8 divisoes); os 4 conjuntos de um pixel viram 4 leituras ponderadas;
-//   - tile inteiro "plano" (nenhum pixel passa do limiar) pula a passada de tensores;
-//   - modo 3 (Qualidade) usa 16 taps (4x4 completo): os 4 cantos saem de graca da memoria compartilhada (+~0,2 dB no host).
-// KRYOSS_MODE (0..3) vem do C++ (-D como "#define" logo apos #version). Uniformes: iguais aos do .frag + uOutSize.
-// KRYOSS_EMU: so para testes no host (WebGL2): roda o MESMO codigo como fragment shader, cada fragmento refazendo o
-// carregamento do tile (sem barrier); tests/glsl_run.py faz a traducao. Em GPU real KRYOSS_EMU nunca e definido.
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. (FidelityFX FSR 1 EASU); MIT License. Licenciado como o Incandescent: LGPL-2.1-only.
 
 #pragma once
 

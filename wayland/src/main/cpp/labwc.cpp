@@ -846,7 +846,7 @@ extern "C" bool compositor_attach_client_window(CompositorHandle* h, uint64_t id
         if (width > 0 && height > 0) {
             post_to_dispatch(st, [st, id, width, height]() {
                 std::lock_guard<std::mutex> dispatch_guard(st->scene_mutex);
-                xdg_shell_request_size(st, id, width, height);
+                xdg_shell_request_size(st, id, width, height, true);
             });
         }
         compositor_signal_vsync_needed();
@@ -881,7 +881,7 @@ extern "C" void compositor_resize_client_window(CompositorHandle* h, uint64_t id
         if (st->renderer) st->renderer->resize_window_output(id, width, height);
         auto vk = st->vulkan_outputs.find(id);
         if (vk != st->vulkan_outputs.end() && vk->second) vk->second->resize(width, height);
-        xdg_shell_request_size(st, id, width, height);
+        xdg_shell_request_size(st, id, width, height, true);
         st->damage_pending.store(true, std::memory_order_release);
         compositor_signal_vsync_needed();
     });

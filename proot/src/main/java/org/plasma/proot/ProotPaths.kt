@@ -1,5 +1,3 @@
-// Parte do PlasmaDroid — módulo PlasmaVK.
-// Créditos: baseado no projeto Proot.
 
 package org.plasma.proot
 
@@ -18,6 +16,10 @@ class ProotPaths(val filesDir: File, val nativeLibDir: File) {
     val marker = File(base, ".rootfs-installed")
     val setupDone = File(base, ".setup-complete")
     val noSeccompFlag = File(base, ".no-seccomp")
+
+    val link2symlinkFlag = File(base, ".link2symlink")
+    val fexTransparentFlag = File(base, ".fex-transparent")
+    val fexHost = File(base, "fex-host")
     fun stepMarker(id: String) = File(base, ".step-$id")
 
     val proot = File(nativeLibDir, "libproot.so")

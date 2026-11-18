@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -81,7 +65,7 @@ private fun IconButton(icon: String, enabled: Boolean = true, onClick: () -> Uni
 @Composable
 private fun InfoCard(content: @Composable ColumnScope.() -> Unit) {
     val b = LocalBreeze.current
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(8.dp)).background(b.view.copy(alpha = .6f))
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(8.dp)).background(b.view.mul(.6f))
         .border(1.dp, b.line.copy(alpha = .6f), RoundedCornerShape(8.dp)).padding(10.dp), content = content)
 }
 
@@ -208,8 +192,8 @@ fun NetworkPanel(session: DesktopSession, inSettings: Boolean = false) {
         }
     }
     PrivilegeNote(session)
-    Row(Modifier.padding(top = 8.dp)) {
-        if (!inSettings) { BreezeButton("Configurar rede…", { session.openTool("settings", "network") }); Spacer(Modifier.width(8.dp)) }
+    ButtonRow(Modifier.padding(top = 8.dp)) {
+        if (!inSettings) { BreezeButton("Configurar rede…", { session.openTool("settings", "network") }); }
         BreezeButton("Ajustes do Android", { ctl.openAndroidWifiSettings() })
     }
 }
@@ -302,8 +286,8 @@ fun BluetoothPanel(session: DesktopSession, inSettings: Boolean = false) {
     }
     PrivilegeNote(session)
     T("Conectar, desconectar e esquecer usam o serviço Shizuku (recurso experimental: depende da versão do Android e do fabricante); sem ele abrimos os ajustes do Android.", 10.sp, b.dim, modifier = Modifier.padding(top = 4.dp))
-    Row(Modifier.padding(top = 8.dp)) {
-        if (!inSettings) { BreezeButton("Configurar Bluetooth…", { session.openTool("settings", "bluetooth") }); Spacer(Modifier.width(8.dp)) }
+    ButtonRow(Modifier.padding(top = 8.dp)) {
+        if (!inSettings) { BreezeButton("Configurar Bluetooth…", { session.openTool("settings", "bluetooth") }); }
         BreezeButton("Ajustes do Android", { ctl.openAndroidBluetoothSettings() })
     }
 }
@@ -344,8 +328,8 @@ fun VolumePanel(session: DesktopSession, inSettings: Boolean = false) {
     Choice("Modo do toque", listOf(
         AudioManager.RINGER_MODE_NORMAL to "Normal", AudioManager.RINGER_MODE_VIBRATE to "Vibrar", AudioManager.RINGER_MODE_SILENT to "Silencioso",
     ), st.ringerMode) { m -> scope.launch { toast(ctl.setRingerMode(m)) } }
-    Row(Modifier.padding(top = 8.dp)) {
-        if (!inSettings) { BreezeButton("Configurar som…", { session.openTool("settings", "audio") }); Spacer(Modifier.width(8.dp)) }
+    ButtonRow(Modifier.padding(top = 8.dp)) {
+        if (!inSettings) { BreezeButton("Configurar som…", { session.openTool("settings", "audio") }); }
         BreezeButton("Ajustes do Android", { ctl.openAndroidSoundSettings() })
     }
 }
@@ -389,8 +373,8 @@ fun BrightnessPanel(session: DesktopSession, inSettings: Boolean = false) {
         }
     }
     PrivilegeNote(session)
-    Row(Modifier.padding(top = 8.dp)) {
-        if (!inSettings) { BreezeButton("Configurar brilho…", { session.openTool("settings", "brightness") }); Spacer(Modifier.width(8.dp)) }
+    ButtonRow(Modifier.padding(top = 8.dp)) {
+        if (!inSettings) { BreezeButton("Configurar brilho…", { session.openTool("settings", "brightness") }); }
         BreezeButton("Ajustes do Android", { ctl.openAndroidDisplaySettings() })
     }
 }

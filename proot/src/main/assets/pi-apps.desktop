@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Pi-Apps
+Comment=Loja de scripts de instalação (Pi-Apps Go)
+Exec=/usr/local/bin/pi-apps
+Icon=/usr/share/pixmaps/pi-apps.png
+Terminal=false
+Categories=System;PackageManager;
+StartupNotify=true

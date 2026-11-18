@@ -1,5 +1,3 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
 #pragma once
 #include <stddef.h>

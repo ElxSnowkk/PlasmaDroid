@@ -1,3 +1,4 @@
+
 #include "notification_bridge.h"
 
 #include <android/log.h>

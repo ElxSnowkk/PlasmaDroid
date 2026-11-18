@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -21,6 +5,10 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -78,7 +66,14 @@ fun DesktopRoot(session: DesktopSession) {
         if (size != IntSize.Zero) session.setScreen(size.width.toFloat(), size.height.toFloat(), panelPx, panelTop)
     }
     LaunchedEffect(st.int(Keys.DESKTOPS, 2)) { session.wm.setDesktopCount(st.int(Keys.DESKTOPS, 2)) }
-    WaylandDisplayContent(session)
+    val piAppsLinux by session.app.linuxApps.apps.collectAsState()
+    LaunchedEffect(piAppsLinux) {
+        if (!st.bool(Keys.PIAPPS_DESK, false) && piAppsLinux.any { it.id == "pi-apps" }) {
+            st.putList(Keys.DESK_ICONS, st.list(Keys.DESK_ICONS, "tool:files,tool:terminal,tool:settings") + "linux:pi-apps")
+            st.put(Keys.PIAPPS_DESK, true)
+        }
+    }
+    WaylandDisplayContent(session, size)
     LaunchedEffect(session.toast) { if (session.toast != null) { delay(3000); session.toast = null } }
 
     val maxed = !wm.showingDesktop && wm.windows.any { it.desktop == wm.desktop && !it.minimized && (it.state == WinState.MAXIMIZED || it.state == WinState.FULLSCREEN) }
@@ -109,14 +104,18 @@ fun DesktopRoot(session: DesktopSession) {
     CompositionLocalProvider(LocalSession provides session, LocalGlass provides session.glass) {
         Box(Modifier.fillMaxSize().background(Color(Themes.byId(theme.id).view)).onSizeChanged { size = it }) {
             GlSurface(session.compositor)
+            X11ServerHost(session)
             DesktopSurface(session, totalDp, panelTop)
             WindowsLayer(session, wm)
             val align = if (panelTop) Alignment.TopCenter else Alignment.BottomCenter
             if (!fullscreen) Panel(session, wm, panelDp, floating, opaque, Modifier.align(align).zIndex(1000f))
             PopupLayer(session, totalDp, panelTop)
             WidgetPicker(session)
+            AppPicker(session)
             ContextMenuHost(session)
+            AppImageDialog(session)
             session.toast?.let { t -> Toast(t, Modifier.align(Alignment.TopCenter).padding(top = 48.dp).zIndex(3000f)) }
+            if (session.piAppsNotice) PiAppsNotice(session, Modifier.align(Alignment.Center).zIndex(3100f))
             if (session.locked) LockScreen(session)
         }
     }
@@ -134,6 +133,24 @@ private fun Toast(t: String, modifier: Modifier) {
 }
 
 @Composable
+private fun PiAppsNotice(session: DesktopSession, modifier: Modifier) {
+    val b = LocalBreeze.current
+    LaunchedEffect(Unit) { delay(4000); session.piAppsNotice = false }
+    Column(
+        modifier.glass(b.window, 14.dp, shadow = 16.dp, z = 40f)
+            .border(1.dp, b.line, RoundedCornerShape(14.dp))
+            .padding(horizontal = 18.dp, vertical = 14.dp)
+            .widthIn(max = 280.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        T("Pi-Apps", 15.sp, b.text, FontWeight.Bold)
+        T("Abrindo Pi-Apps pela primeira vez.", 13.sp, b.text, modifier = Modifier.padding(top = 6.dp))
+        T("Isso pode demorar um pouco.", 12.sp, b.dim, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
 fun DesktopSurface(session: DesktopSession, panelDp: Int, panelTop: Boolean) {
     val st = session.app.settings
     st.watch()
@@ -145,16 +162,19 @@ fun DesktopSurface(session: DesktopSession, panelDp: Int, panelTop: Boolean) {
             .pointerInput(Unit) { detectTapGestures(onTap = { session.closePopups() }, onLongPress = { p -> desktopMenu(session, p) }) }
             .onSecondaryClick { desktopMenu(session, it) },
     ) {
-        Column(Modifier.padding(12.dp)) {
+        FlowColumn(Modifier.fillMaxHeight().padding(12.dp)) {
             icons.forEach { id ->
+                var origin by remember { mutableStateOf(Offset.Zero) }
+                fun menu(p: Offset) {
+                    session.menu = MenuState(p.x, p.y, listOf(
+                        MenuItem("Abrir") { openById(session, id) },
+                        MenuItem("Remover da área de trabalho") { st.putList(Keys.DESK_ICONS, icons - id) }))
+                }
                 Column(
                     Modifier.width(88.dp).padding(vertical = 4.dp).clip(RoundedCornerShape(6.dp))
-                        .clickable { openById(session, id) }
-                        .onSecondaryClick { p ->
-                            session.menu = MenuState(p.x, p.y, listOf(
-                                MenuItem("Abrir") { openById(session, id) },
-                                MenuItem("Remover da área de trabalho") { st.putList(Keys.DESK_ICONS, icons - id) }))
-                        }.padding(6.dp),
+                        .onGloballyPositioned { origin = it.positionInRoot() }
+                        .pointerInput(id) { detectTapGestures(onLongPress = { p -> menu(origin + p) }) { openById(session, id) } }
+                        .onSecondaryClick { p -> menu(p) }.padding(6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     EntryIcon(id, U.iconL)
@@ -168,7 +188,11 @@ fun DesktopSurface(session: DesktopSession, panelDp: Int, panelTop: Boolean) {
 
 private fun desktopMenu(session: DesktopSession, p: Offset) {
     session.menu = MenuState(p.x, p.y, listOf(
+        MenuItem("Adicionar aplicativo à área de trabalho…") { session.appPicker = true },
         MenuItem("Adicionar widgets…") { session.widgetPicker = true },
+        MenuItem(if (session.app.settings.bool(Keys.FX_GLASS, false)) "Desativar modo Glass" else "Ativar modo Glass") {
+            session.app.settings.put(Keys.FX_GLASS, !session.app.settings.bool(Keys.FX_GLASS, false))
+        },
         MenuItem("Trocar papel de parede…") { session.openTool("settings", "appearance") },
         MenuItem("Configurar a área de trabalho…") { session.openTool("settings", "appearance") },
         MenuItem("", separator = true),
@@ -253,6 +277,47 @@ fun WidgetPicker(session: DesktopSession) {
                     st.putList(Keys.WIDGETS, st.list(Keys.WIDGETS) + "$id@${360 + n * 24}@${40 + n * 24}")
                     session.widgetPicker = false
                 }.padding(horizontal = 14.dp, vertical = 10.dp)) { T(label) }
+            }
+        }
+    }
+}
+
+@Composable
+fun AppPicker(session: DesktopSession) {
+    if (!session.appPicker) return
+    val st = session.app.settings
+    st.watch()
+    val b = LocalBreeze.current
+    val apps by session.app.apps.collectAsState()
+    val linuxApps by session.app.linuxApps.apps.collectAsState()
+    val desk = st.list(Keys.DESK_ICONS, "tool:files,tool:terminal,tool:settings")
+    var query by remember { mutableStateOf("") }
+    val all = remember(apps, linuxApps) { listOf("tool:files", "tool:terminal", "tool:settings", "tool:capture") + apps.sortedBy { it.label.lowercase() }.map { "app:${it.pkg}" } + linuxApps.map { "linux:${it.id}" } }
+    val shown = all.filter { it !in desk && (query.isBlank() || entryLabel(it, apps).contains(query.trim(), ignoreCase = true)) }
+    Box(Modifier.fillMaxSize().zIndex(2500f).background(Color(0x66000000)).pointerInput(Unit) { detectTapGestures { session.appPicker = false } },
+        contentAlignment = Alignment.Center) {
+        PopupSurface(Modifier.widthIn(max = 360.dp).fillMaxWidth(.92f).heightIn(max = 520.dp).padding(8.dp)) {
+            T("Adicionar à área de trabalho", 15.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(12.dp))
+            Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().clip(RoundedCornerShape(5.dp)).background(b.view.mul(.85f))
+                .border(1.dp, b.line, RoundedCornerShape(5.dp)).padding(horizontal = 9.dp, vertical = 8.dp)) {
+                androidx.compose.foundation.text.BasicTextField(
+                    query, { query = it }, singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = b.text, fontSize = 13.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(b.accent),
+                    decorationBox = { inner -> Box { if (query.isEmpty()) T("Buscar aplicativo…", 13.sp, b.dim); inner() } },
+                )
+            }
+            LazyColumn(Modifier.weight(1f, fill = false).padding(top = 6.dp)) {
+                if (shown.isEmpty()) item { T("Nada para adicionar", 12.sp, b.dim, modifier = Modifier.padding(16.dp)) }
+                items(shown, key = { it }) { id ->
+                    Row(Modifier.fillMaxWidth().breezeClickable(4.dp) {
+                        st.putList(Keys.DESK_ICONS, st.list(Keys.DESK_ICONS, "tool:files,tool:terminal,tool:settings") + id)
+                        session.appPicker = false
+                    }.padding(horizontal = 14.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        EntryIcon(id, 30.dp)
+                        T(entryLabel(id, apps), modifier = Modifier.padding(start = 12.dp), maxLines = 1)
+                    }
+                }
             }
         }
     }

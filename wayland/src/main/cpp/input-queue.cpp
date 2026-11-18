@@ -1,3 +1,4 @@
+
 #include <jni.h>
 #include <android/input.h>
 #include <android/log.h>
@@ -359,7 +360,7 @@ void OnCaptionBarHeightReceived(JNIEnv *env, jclass clazz,
 }
 
 template <typename T, size_t N>
-char (&ArraySizeHelper(T (&array)[N]))[N];  // NOLINT(readability/casting)
+char (&ArraySizeHelper(T (&array)[N]))[N];
 
 #define arraysize(array) (sizeof(ArraySizeHelper(array)))
 

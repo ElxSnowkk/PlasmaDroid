@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <android/native_window.h>
@@ -531,7 +532,7 @@ void seat_cleanup(State* st);
 void compositor_set_keyboard_focus(State* st, Toplevel* tl);
 void text_input_focus_changed(State* st, Surface* new_focus);
 void xdg_shell_request_close(State* st, uint64_t id);
-void xdg_shell_request_size(State* st, uint64_t id, int width, int height);
+void xdg_shell_request_size(State* st, uint64_t id, int width, int height, bool force = false);
 void compositor_clear_keyboard_focus(State* st);
 bool dmabuf_globals_register(State* st);
 bool presentation_globals_register(State* st);

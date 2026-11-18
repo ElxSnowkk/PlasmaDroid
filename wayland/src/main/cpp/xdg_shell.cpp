@@ -550,7 +550,8 @@ void xdg_surface_get_toplevel(wl_client* c, wl_resource* xdg_res, uint32_t id) {
         [](Surface* s, void* cookie) -> bool {
             Toplevel* tl = static_cast<Toplevel*>(cookie);
             if (!tl) return true;
-            if (tl->awaiting_ack && s->pending.buffer_set && s->pending.buffer) {
+
+            if (s->pending.buffer_set && s->pending.buffer) {
                 tl->awaiting_ack = false;
                 tl->mapped = true;
             }
@@ -967,12 +968,19 @@ void xdg_shell_request_close(State* st, uint64_t id) {
     }
 }
 
-void xdg_shell_request_size(State* st, uint64_t id, int width, int height) {
+void xdg_shell_request_size(State* st, uint64_t id, int width, int height, bool force) {
     if (!st || id == 0 || width <= 0 || height <= 0) return;
     for (auto& entry : st->toplevels) {
         Toplevel* t = entry.get();
         if (!t || t->id != id || !t->mapped || !t->xdg_toplevel || !t->xdg_surface) continue;
-        if (t->width == width && t->height == height) return;
+        bool buffer_matches = false;
+        if (t->surface && t->surface->buffer_w > 0 && t->surface->buffer_h > 0) {
+            int bw = t->surface->buffer_w, bh = t->surface->buffer_h;
+            buffer_transform_dimensions(bw, bh, t->surface->current.buffer_transform);
+            const int sc = std::max(1, t->surface->current.buffer_scale);
+            buffer_matches = (bw / sc == width && bh / sc == height);
+        }
+        if (!force && t->width == width && t->height == height && buffer_matches && !t->awaiting_ack) return;
         t->width = width;
         t->height = height;
         wl_array states;

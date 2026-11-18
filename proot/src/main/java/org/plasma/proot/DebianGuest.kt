@@ -1,5 +1,3 @@
-// Parte do PlasmaDroid — módulo PlasmaVK.
-// Créditos: baseado no projeto Proot.
 
 package org.plasma.proot
 
@@ -13,10 +11,12 @@ object DebianGuest {
         for (d in listOf("dev", "proc", "sys", "tmp", "root", "etc")) File(root, d).mkdirs()
         File(root, "tmp").setWritable(true, false)
         ensureResolvConf(root)
+        runCatching { ensureInitStub(root) }
     }
 
-    fun apply(rootfs: File) {
-        runCatching { ensureResolvConf(rootfs) }
+    fun apply(rootfs: File, deviceDns: List<String> = emptyList()) {
+        runCatching { ensureResolvConf(rootfs, deviceDns) }
+        runCatching { ensureInitStub(rootfs) }
         runCatching { configureApt(rootfs) }
         runCatching { syncAndroidGroups(rootfs) }
         runCatching { configureShellStartup(rootfs) }
@@ -24,12 +24,29 @@ object DebianGuest {
         runCatching { GuestPatches.install(rootfs) }
     }
 
-    fun ensureResolvConf(rootfs: File) {
+    fun ensureResolvConf(rootfs: File, deviceDns: List<String> = emptyList()) {
         val etc = File(rootfs, "etc").apply { mkdirs() }
         val f = File(etc, "resolv.conf")
-        val broken = java.nio.file.Files.isSymbolicLink(f.toPath()) || !f.isFile ||
-            f.readLines().none { l -> l.trim().startsWith("nameserver") && !l.contains("127.0.") && !l.contains("::1") }
-        if (broken) { java.nio.file.Files.deleteIfExists(f.toPath()); f.writeText("nameserver 1.1.1.1\nnameserver 8.8.8.8\n") }
+        val servers = (deviceDns.take(2) + HostDns.PUBLIC).distinct().take(3)
+        val text = buildString {
+            servers.forEach { append("nameserver ").append(it).append('\n') }
+            append("options timeout:2 attempts:3\n")
+        }
+        val isLink = java.nio.file.Files.isSymbolicLink(f.toPath())
+        if (isLink || !f.isFile || f.readText() != text) {
+            java.nio.file.Files.deleteIfExists(f.toPath())
+            f.writeText(text)
+        }
+    }
+
+    fun ensureInitStub(rootfs: File) {
+        val sbin = File(rootfs, "usr/sbin").apply { mkdirs() }
+        val init = File(sbin, "init")
+        val p = init.toPath()
+        val exists = java.nio.file.Files.exists(p)
+        if (exists) return
+        java.nio.file.Files.deleteIfExists(p)
+        java.nio.file.Files.createSymbolicLink(p, java.nio.file.Paths.get("/usr/bin/bash"))
     }
 
     private fun configureApt(rootfs: File) {
@@ -107,41 +124,104 @@ if [ -n "${'$'}res" ]; then echo "${'$'}res"; else echo "indisponível (vulkanin
 """
 
     private const val X11_LAUNCHER_SH = """#!/bin/sh
-# plasma-x11 [--background] [:N]   — inicia o Xwayland (rootful) dentro do compositor Wayland do PlasmaDroid.
-BG=0; D=:0
-for a in "§@"; do case "§a" in --background) BG=1;; --child) ;; :*) D="§a";; esac; done
-export XDG_RUNTIME_DIR="§{XDG_RUNTIME_DIR:-/run/plasma-wayland}"
-export WAYLAND_DISPLAY="§{WAYLAND_DISPLAY:-wayland-0}"
-N="§{D#:}"
-if ! command -v Xwayland >/dev/null 2>&1; then
-  echo "[X11] Xwayland não está instalado. Rode: apt-get install -y xwayland x11-xserver-utils openbox"
-  exit 1
-fi
-if [ -S "/tmp/.X11-unix/X§N" ] && [ -f "/tmp/.X§N-lock" ] && kill -0 "§(cat /tmp/.X§N-lock 2>/dev/null)" 2>/dev/null; then
-  echo "[X11] já ativo em §D"; exit 0
-fi
-if [ "§BG" = 1 ] && [ -z "§PLASMA_X11_CHILD" ]; then
-  PLASMA_X11_CHILD=1 nohup "§0" --child "§D" >/tmp/plasma-x11.log 2>&1 &
-  exit 0
-fi
-rm -f "/tmp/.X§N-lock" "/tmp/.X11-unix/X§N"
-mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
-export XWAYLAND_NO_GLAMOR="§{XWAYLAND_NO_GLAMOR:-1}"
-GEOM="§{PLASMA_X11_GEOMETRY:-1280x720}"
-Xwayland "§D" -rootful -geometry "§GEOM" -noreset -nolisten tcp >/tmp/xwayland.log 2>&1 &
-XPID=§!
-i=0
-while [ §i -lt 100 ]; do
-  [ -S "/tmp/.X11-unix/X§N" ] && break
-  kill -0 §XPID 2>/dev/null || { echo "[X11] o Xwayland encerrou; veja /tmp/xwayland.log"; exit 1; }
-  sleep 0.1; i=§((i+1))
-done
-export DISPLAY="§D"
-for wm in openbox xfwm4 icewm fluxbox twm; do
-  if command -v §wm >/dev/null 2>&1; then §wm >/dev/null 2>&1 & break; fi
-done
-echo "[X11] pronto em §D (Xwayland rootful, §GEOM)"
-wait §XPID
+# plasma-x11 [start [new|:N]|stop [:N]|--status|--list|run [--new|:N] <app...>]
+#
+# Comando do servidor X11 NATIVO do PlasmaDroid. O servidor roda no app Android (libplasma_x11.so);
+# este comando só manda pedidos para o app (/tmp/plasma-x11.request) e lê a resposta (/tmp/plasma-x11.reply).
+#   start        garante que exista um display (cria :0; se já houver um nosso, reaproveita)
+#   start new    cria SEMPRE um display novo (:1, :2...) = uma nova janela/sessão X11
+#   start :N     exige o display :N (falha se estiver ocupado por outro processo)
+#   run [--new] <app>   roda o app no display certo (com --new, num display novo)
+# Se o :0 estiver ocupado por outro servidor, o PlasmaDroid pula para o próximo livre sozinho.
+REQ=/tmp/plasma-x11.request
+REPLY=/tmp/plasma-x11.reply
+CUR=/tmp/plasma-x11.display
+STATUS=/tmp/plasma-x11.status
+
+sock() { echo "/tmp/.X11-unix/X§{1#:}"; }
+
+# ask <pedido...>  -> imprime ":N" no stdout; erros vão para o stderr
+ask() {
+  rm -f "§REPLY"
+  echo "§*" > "§REQ"
+  i=0
+  while [ ! -s "§REPLY" ] && [ "§i" -lt 75 ]; do sleep 0.2; i=§((i + 1)); done
+  if [ ! -s "§REPLY" ]; then
+    echo "[X11] o PlasmaDroid não respondeu (o desktop está aberto?). Veja: plasma-x11 --status" >&2
+    return 1
+  fi
+  r=§(cat "§REPLY")
+  case "§r" in
+    :[0-9]*) echo "§r"; return 0 ;;
+  esac
+  echo "[X11] §r" >&2
+  return 1
+}
+
+valid_display() {
+  case "§1" in :[0-9]*) n="§{1#:}"; n="§{n%%.*}"; case "§n" in ''|*[!0-9]*) return 1 ;; esac; return 0 ;; esac
+  return 1
+}
+
+case "§1" in
+  --status)
+    if [ -r "§CUR" ]; then
+      d=§(cat "§CUR")
+      if [ -S "§(sock "§d")" ]; then
+        echo "[X11] ativo em §d (servidor nativo do PlasmaDroid)"
+        [ -r "§STATUS" ] && echo "[X11] §(cat "§STATUS")"
+        exit 0
+      fi
+    fi
+    echo "[X11] inativo: rode plasma-x11 start"
+    [ -r "§STATUS" ] && echo "[X11] último estado do app: §(cat "§STATUS")"
+    exit 1 ;;
+  --list)
+    for s in /tmp/.X11-unix/X*; do [ -S "§s" ] && echo ":§{s##*/X}"; done
+    exit 0 ;;
+  stop)
+    ask stop §2 >/dev/null 2>&1
+    echo "[X11] parado"; exit 0 ;;
+  start|"")
+    shift 2>/dev/null
+    d=§(ask start §@) || exit 1
+    echo "[X11] ativo em §d"
+    [ "§1" = new ] && echo "[X11] use: plasma-x11 run §d <app>   (ou DISPLAY=§d <app>)"
+    exit 0 ;;
+  run)
+    shift
+    req="start"
+    case "§1" in
+      --new|new) req="start new"; shift ;;
+      :[0-9]*) if valid_display "§1"; then req="start §1"; shift; fi ;;
+    esac
+    [ -n "§PLASMA_X11_DISPLAY" ] && [ "§req" = start ] && valid_display "§PLASMA_X11_DISPLAY" && req="start §PLASMA_X11_DISPLAY"
+    d=§(ask §req) || exit 1
+    export DISPLAY="§d" GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb SDL_VIDEODRIVER=x11 MOZ_ENABLE_WAYLAND=0 XDG_SESSION_TYPE=x11
+    [ "§#" -gt 0 ] && exec "§@"
+    echo "§d"
+    exit 0 ;;
+  *)
+    echo "uso: plasma-x11 [start [new|:N]|stop [:N]|--status|--list|run [--new|:N] <app...>]"; exit 2 ;;
+esac
+"""
+
+    private const val X11_ENV_SH = """# PlasmaDroid: mantém DISPLAY válido (o servidor X11 pode subir depois do shell, ou mudar de :0 para :1)
+__plasma_dpy() {
+  _pf=/tmp/plasma-x11.display
+  [ -r "§_pf" ] || return 0
+  _pd=§(cat "§_pf" 2>/dev/null)
+  _pn="§{_pd#:}"
+  case "§_pn" in ''|*[!0-9]*) return 0 ;; esac
+  [ -S "/tmp/.X11-unix/X§_pn" ] || return 0
+  case "§{DISPLAY:-}" in
+    '') export DISPLAY="§_pd" ;;
+    :[0-9]*)
+      _pc="§{DISPLAY#:}"; _pc="§{_pc%%.*}"
+      [ -S "/tmp/.X11-unix/X§_pc" ] || export DISPLAY="§_pd" ;;
+  esac
+  return 0
+}
 """
 
     fun writeX11Launcher(rootfs: File) {
@@ -150,6 +230,12 @@ wait §XPID
         val text = X11_LAUNCHER_SH.replace('§', '$')
         if (!f.isFile || f.readText() != text) f.writeText(text)
         f.setReadable(true, false); f.setExecutable(true, false)
+
+        val lib = File(rootfs, "usr/local/lib").apply { mkdirs() }
+        val env = File(lib, "plasma-x11-env.sh")
+        val envText = X11_ENV_SH.replace('§', '$')
+        if (!env.isFile || env.readText() != envText) env.writeText(envText)
+        env.setReadable(true, false)
     }
 
     fun writeFastfetchConfig(rootfs: File) {

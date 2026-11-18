@@ -1,8 +1,4 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
-// Shared fullscreen vertex shader for all Incandescent upscaler backends.
-// SPDX-License-Identifier: LGPL-2.1-only
 
 #pragma once
 

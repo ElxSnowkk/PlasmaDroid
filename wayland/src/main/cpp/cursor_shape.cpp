@@ -1,3 +1,4 @@
+
 #include "labwc.h"
 extern "C" {
 #include "cursor-shape-protocol.h"

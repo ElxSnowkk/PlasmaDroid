@@ -1,5 +1,3 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
 #ifndef __gl_glext_h_
 #define __gl_glext_h_ 1

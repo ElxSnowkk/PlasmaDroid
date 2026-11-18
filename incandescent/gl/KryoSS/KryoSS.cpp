@@ -1,8 +1,4 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
-// KryoSS spatial upscaler — independent of the FSR1 algorithm.
-// SPDX-License-Identifier: LGPL-2.1-only
 
 #include "KryoSS.h"
 

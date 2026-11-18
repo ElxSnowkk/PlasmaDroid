@@ -1,4 +1,3 @@
-// Parte do projeto PlasmaDroid.
 
 package org.plasma.app.wayland
 
@@ -186,27 +185,29 @@ class WaylandSessionManager(context: Context) {
         }
     }
 
-    fun clientEnvironment(x11: Boolean = false): Map<String, String> =
-        if (x11) mapOf(
+    fun clientEnvironment(x11: Boolean = false, display: Int? = null): Map<String, String> {
+        val dpy = display?.let { ":$it" }
+        return if (x11) mapOf(
             "XDG_RUNTIME_DIR" to guestRuntimePath,
-            "WAYLAND_DISPLAY" to "wayland-0",
-            "DISPLAY" to ":0",
+            "DISPLAY" to (dpy ?: ":0"),
             "XDG_SESSION_TYPE" to "x11",
             "GDK_BACKEND" to "x11",
             "QT_QPA_PLATFORM" to "xcb",
             "SDL_VIDEODRIVER" to "x11",
             "MOZ_ENABLE_WAYLAND" to "0",
             "PLASMA_X11" to "1",
-        ) else mapOf(
-            "XDG_RUNTIME_DIR" to guestRuntimePath,
-            "XDG_SESSION_TYPE" to "wayland",
-            "WAYLAND_DISPLAY" to "wayland-0",
-            "GDK_BACKEND" to "wayland",
-            "QT_QPA_PLATFORM" to "wayland",
-            "SDL_VIDEODRIVER" to "wayland",
-            "MOZ_ENABLE_WAYLAND" to "1",
-            "EGL_PLATFORM" to "wayland",
-        )
+        ) else buildMap {
+            put("XDG_RUNTIME_DIR", guestRuntimePath)
+            put("XDG_SESSION_TYPE", "wayland")
+            put("WAYLAND_DISPLAY", "wayland-0")
+            put("GDK_BACKEND", "wayland")
+            put("QT_QPA_PLATFORM", "wayland")
+            put("SDL_VIDEODRIVER", "wayland")
+            put("MOZ_ENABLE_WAYLAND", "1")
+            put("EGL_PLATFORM", "wayland")
+            if (dpy != null) put("DISPLAY", dpy)
+        }
+    }
 
     fun clientBinds(paths: ProotPaths): List<Pair<File, String>> {
         File(paths.rootfs, guestRuntimePath.removePrefix("/")).mkdirs()
@@ -341,6 +342,18 @@ class WaylandSessionManager(context: Context) {
             val current = handle
             if (current != 0L) runCatching { onRender(Unit) { NativeWaylandBridge.nativeResize(current, width, height) } }
         }
+    }
+
+    @Volatile private var pendingW = 0
+    @Volatile private var pendingH = 0
+    private val pendingResize = Runnable { resizeSurface(pendingW, pendingH) }
+
+    fun requestOutputSize(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        pendingW = width
+        pendingH = height
+        renderHandler.removeCallbacks(pendingResize)
+        renderHandler.postDelayed(pendingResize, 150L)
     }
 
     fun detachSurface() {

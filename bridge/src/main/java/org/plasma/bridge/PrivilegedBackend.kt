@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.bridge
 
@@ -152,17 +136,19 @@ class ShizukuBackend(private val svc: IPrivilegedService) : PrivilegedBackend {
     }
     override fun touch(displayId: Int, action: Int, actionIndex: Int, mouse: Boolean, buttonState: Int, downTime: Long,
                        times: LongArray, ids: IntArray, xy: FloatArray) {
-        if (action == 0) logStatsIfDue()
-
         safe(Unit) { svc.injectTouch(displayId, action, actionIndex, if (mouse) 0x2002 else 0x1002, buttonState, downTime, times, ids, xy) }
+        if (action == 0) logStatsIfDue()
     }
     private var lastStats = 0L
+    private val statsExec = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "plasma-input-stats").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
+    }
 
     private fun logStatsIfDue() {
         val now = System.currentTimeMillis()
         if (now - lastStats < 5000) return
         lastStats = now
-        PlasmaLog.i("input", safe("indisponível") { svc.inputStats() })
+        statsExec.execute { PlasmaLog.i("input", safe("indisponível") { svc.inputStats() }) }
     }
     override fun key(displayId: Int, keyCode: Int, action: Int, meta: Int, downTime: Long, eventTime: Long) =
         safe(Unit) { svc.injectKey(displayId, keyCode, action, meta, downTime, eventTime) }

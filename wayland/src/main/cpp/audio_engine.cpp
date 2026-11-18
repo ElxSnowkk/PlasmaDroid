@@ -1,3 +1,4 @@
+
 #include "audio_engine.h"
 
 #include <android/log.h>
@@ -399,4 +400,3 @@ extern "C" void audio_engine_set_volume(AudioEngine* eng, float volume) {
     if (volume > 1.0f) volume = 1.0f;
     eng->volume.store(volume, std::memory_order_relaxed);
 }
-

@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -37,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import org.plasma.app.session.AppImageSupport
 import org.plasma.app.session.DesktopSession
 import org.plasma.app.session.MenuItem
 import org.plasma.app.session.MenuState
@@ -86,17 +71,29 @@ fun FileManager(session: DesktopSession) {
     }
     fun go(f: File) { if (f != dir) { back.addLast(dir); dir = f } }
 
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+
+    val w = maxWidth
+    val compact = w < 460.dp
+    val showSize = w >= 340.dp
+    val showDate = w >= 560.dp
+    val placesW = if (w < 720.dp) 112.dp else 150.dp
+    var showPlaces by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxSize()) {
-        Column(Modifier.width(150.dp).fillMaxHeight().background(b.window).padding(6.dp)) {
+        if (!compact || showPlaces) Column(Modifier.width(placesW).fillMaxHeight().background(b.window).padding(6.dp)) {
             T("Lugares", 11.sp, b.dim, modifier = Modifier.padding(6.dp))
             listOf("Início" to root, "Downloads" to File(root, "Download"), "Imagens" to File(root, "Pictures"), "Câmera" to File(root, "DCIM"),
                 "Músicas" to File(root, "Music"), "Vídeos" to File(root, "Movies"), "Documentos" to File(root, "Documents")).forEach { (n, f) ->
                 Box(Modifier.fillMaxWidth().background(if (dir == f) b.accent.copy(alpha = .3f) else androidx.compose.ui.graphics.Color.Transparent)
-                    .clickable { go(f) }.padding(8.dp)) { T(n, 13.sp) }
+                    .clickable { go(f); if (compact) showPlaces = false }.padding(8.dp)) { T(n, 13.sp, maxLines = 1) }
             }
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
             Row(Modifier.fillMaxWidth().background(b.window).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (compact) {
+                    Box(Modifier.size(30.dp).breezeClickable(5.dp) { showPlaces = !showPlaces }, contentAlignment = Alignment.Center) { BreezeIcon("list", 16.dp, if (showPlaces) b.accent else b.text) }
+                    Spacer(Modifier.width(4.dp))
+                }
                 Box(Modifier.size(30.dp).breezeClickable(5.dp, enabled = back.isNotEmpty()) { back.removeLastOrNull()?.let { dir = it } }, contentAlignment = Alignment.Center) { BreezeIcon("arrowL", 16.dp, if (back.isNotEmpty()) b.text else b.dim.copy(alpha = .4f)) }
                 Spacer(Modifier.width(4.dp))
                 Box(Modifier.size(30.dp).breezeClickable(5.dp, enabled = dir != root) { dir.parentFile?.takeIf { dir != root }?.let { go(it) } }, contentAlignment = Alignment.Center) { BreezeIcon("arrowUp", 16.dp, if (dir != root) b.text else b.dim.copy(alpha = .4f)) }
@@ -108,9 +105,14 @@ fun FileManager(session: DesktopSession) {
                         BreezeIcon("chevR", 12.dp, b.dim, Modifier.padding(top = 6.dp))
                     }
                 }
-                BreezeButton("Nova pasta", { newFolder = true })
-                Spacer(Modifier.width(4.dp))
-                BreezeButton(if (showHidden) "Ocultar ocultos" else "Mostrar ocultos", { showHidden = !showHidden })
+                if (compact) {
+                    Box(Modifier.size(30.dp).breezeClickable(5.dp) { newFolder = true }, contentAlignment = Alignment.Center) { BreezeIcon("plus", 16.dp, b.text) }
+                    Box(Modifier.size(30.dp).breezeClickable(5.dp) { showHidden = !showHidden }, contentAlignment = Alignment.Center) { BreezeIcon("eye", 16.dp, if (showHidden) b.accent else b.dim) }
+                } else {
+                    BreezeButton("Nova pasta", { newFolder = true })
+                    Spacer(Modifier.width(4.dp))
+                    BreezeButton(if (showHidden) "Ocultar ocultos" else "Mostrar ocultos", { showHidden = !showHidden })
+                }
             }
             if (!hasAccess) Row(Modifier.fillMaxWidth().background(b.accent.copy(alpha = .2f)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 T("Sem acesso a todos os arquivos.", 12.sp, modifier = Modifier.weight(1f))
@@ -143,6 +145,7 @@ fun FileManager(session: DesktopSession) {
                         .onSecondaryClick { p ->
                             session.menu = MenuState(p.x, p.y, buildList {
                                 add(MenuItem("Abrir") { if (f.isDirectory) go(f) else openFile(session, f) })
+                                if (!row.dir && AppImageSupport.isAppImage(f)) add(MenuItem("Executar AppImage…") { session.promptAppImage(f) })
                                 if (row.image)
                                     add(MenuItem("Usar como papel de parede") { session.app.settings.put(Keys.WALLPAPER, android.net.Uri.fromFile(f).toString()) })
                                 add(MenuItem("Renomear…") { rename = f })
@@ -154,14 +157,15 @@ fun FileManager(session: DesktopSession) {
                             })
                         }.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        BreezeIcon(if (row.dir) "folder" else "file", 20.dp, if (row.dir) b.accent else b.dim)
+                        if (row.dir) BreezeIcon("folder", 22.dp, b.accent) else FileTypeIcon(f, 22.dp)
                         T(f.name, 13.sp, modifier = Modifier.weight(1f).padding(start = 10.dp), maxLines = 1)
-                        T(row.info, 11.sp, b.dim, modifier = Modifier.width(80.dp), maxLines = 1)
-                        T(row.date, 11.sp, b.dim, modifier = Modifier.width(80.dp), maxLines = 1)
+                        if (showSize) T(row.info, 11.sp, b.dim, modifier = Modifier.width(76.dp), maxLines = 1)
+                        if (showDate) T(row.date, 11.sp, b.dim, modifier = Modifier.width(84.dp), maxLines = 1)
                     }
                 }
             }
         }
+    }
     }
 }
 
@@ -174,6 +178,7 @@ private fun humanSize(n: Long): String = when {
 }
 
 private fun openFile(session: DesktopSession, f: File) {
+    if (AppImageSupport.isAppImage(f)) { session.promptAppImage(f); return }
     val ctx = session.app
     try {
         val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)

@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -45,7 +29,16 @@ data class Breeze(
     val positive: Color = Color(0xFF27AE60), val negative: Color = Color(0xFFDA4453), val neutral: Color = Color(0xFFF67400),
 ) {
     val onAccent: Color get() = Color(0xFFFCFCFC)
+
+    fun glassed(): Breeze = copy(
+        window = window.copy(alpha = GLASS_ALPHA), view = view.copy(alpha = GLASS_ALPHA), panel = panel.copy(alpha = GLASS_ALPHA),
+        titleOn = titleOn.copy(alpha = GLASS_ALPHA), titleOff = titleOff.copy(alpha = GLASS_ALPHA), button = button.copy(alpha = GLASS_ALPHA),
+    )
 }
+
+const val GLASS_ALPHA = 0.10f
+
+fun Color.mul(a: Float): Color = copy(alpha = alpha * a)
 
 @Immutable
 data class GlobalTheme(
@@ -107,9 +100,11 @@ data class Fx(
     val shadows: Boolean = true,
     val animSpeed: Float = 1f,
     val gpu: Boolean = true,
+    val glass: Boolean = false,
 ) {
     val realBlur: Boolean get() = blur && gpu
     fun alpha(kind: Float = 1f): Float {
+        if (glass) return 1f
         val range = if (realBlur) 0.55f else 0.30f
         val a = 1f - range * transparency * (2f - kind).coerceIn(0.3f, 1.7f)
         return a.coerceIn(0.25f, 1f)
@@ -136,15 +131,17 @@ fun PlasmaTheme(settings: SettingsStore, gpuAlive: Boolean = true, content: @Com
     val theme = Themes.byId(settings.string(Keys.THEME, "breeze-dark"))
     val accentRaw = settings.int(Keys.ACCENT, U.THEME_ACCENT)
     val accent = if (accentRaw == U.THEME_ACCENT) Color(theme.accent) else Color(accentRaw)
-    val b = remember(theme, accent) { breeze(theme, accent) }
+    val glass = settings.bool(Keys.FX_GLASS, false)
+    val b = remember(theme, accent, glass) { breeze(theme, accent).let { if (glass) it.glassed() else it } }
     val fx = Fx(
         blur = settings.bool(Keys.FX_BLUR, true),
         transparency = settings.float(Keys.FX_TRANSPARENCY, 0.5f),
         shadows = settings.bool(Keys.FX_SHADOWS, true),
         animSpeed = settings.float(Keys.FX_ANIM_SPEED, 1f),
         gpu = gpuAlive,
+        glass = glass,
     )
-    val scale = settings.float(Keys.UI_SCALE, Keys.DEFAULT_UI_SCALE).coerceIn(Keys.MIN_UI_SCALE, Keys.MAX_UI_SCALE)
+    val scale = UiScale.effective(androidx.compose.ui.platform.LocalContext.current, settings)
     val d = LocalDensity.current
     val scaled = remember(d.density, d.fontScale, scale) { Density(d.density * scale, d.fontScale) }
     val scheme = if (theme.dark) darkColorScheme(primary = accent, background = b.window, surface = b.window, onSurface = b.text,

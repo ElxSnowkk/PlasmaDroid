@@ -1,3 +1,4 @@
+
 #include "labwc.h"
 extern "C" {
 #include "pointer-gestures-protocol.h"

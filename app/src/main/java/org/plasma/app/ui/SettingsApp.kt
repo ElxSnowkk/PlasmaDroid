@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -77,8 +61,20 @@ fun SettingsApp(session: DesktopSession) {
     val filtered = remember(q) { if (q.isEmpty()) CATS else CATS.filter { (it.label + " " + it.keywords + " " + it.group).contains(q, ignoreCase = true) } }
     val page = if (CATS.any { it.id == session.settingsPage }) session.settingsPage else "appearance"
 
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+
+    val compact = maxWidth < 640.dp
+    val sideW = if (maxWidth < 820.dp) 180.dp else 220.dp
+    val deep = remember { session.settingsDeep.also { session.settingsDeep = false } }
+    var showPage by remember { mutableStateOf(deep) }
+    var seenPage by remember { mutableStateOf(session.settingsPage) }
+    LaunchedEffect(session.settingsPage, session.settingsDeep) {
+        if (seenPage != session.settingsPage || session.settingsDeep) { seenPage = session.settingsPage; session.settingsDeep = false; showPage = true }
+    }
+    val showList = !compact || !showPage
+    val showDetail = !compact || showPage
     Row(Modifier.fillMaxSize()) {
-        Column(Modifier.width(220.dp).fillMaxHeight().background(b.view.copy(alpha = .55f))) {
+        if (showList) Column((if (compact) Modifier.weight(1f) else Modifier.width(sideW)).fillMaxHeight().background(b.view.mul(.55f))) {
             Box(Modifier.fillMaxWidth().padding(10.dp).clip(RoundedCornerShape(6.dp)).background(b.window).border(1.dp, b.line, RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 8.dp)) {
                 if (query.isEmpty()) Row(verticalAlignment = Alignment.CenterVertically) { BreezeIcon("search", 14.dp, b.dim); Spacer(Modifier.width(6.dp)); T("Pesquisar…", 13.sp, b.dim) }
                 BasicTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
@@ -96,7 +92,7 @@ fun SettingsApp(session: DesktopSession) {
                     Row(
                         Modifier.fillMaxWidth().padding(vertical = 1.dp).clip(RoundedCornerShape(6.dp))
                             .drawBehind { drawRect(b.accent.copy(alpha = a)) }
-                            .breezeClickable(6.dp) { session.settingsPage = c.id }
+                            .breezeClickable(6.dp) { session.settingsPage = c.id; showPage = true }
                             .padding(horizontal = 10.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -107,18 +103,22 @@ fun SettingsApp(session: DesktopSession) {
                 if (filtered.isEmpty()) T("Nada encontrado para “$q”", 12.sp, b.dim, modifier = Modifier.padding(12.dp))
             }
         }
-        Box(Modifier.width(1.dp).fillMaxHeight().background(b.line.copy(alpha = .7f)))
-        Column(Modifier.weight(1f).fillMaxHeight().background(b.window.copy(alpha = .7f))) {
+        if (showList && showDetail) Box(Modifier.width(1.dp).fillMaxHeight().background(b.line.copy(alpha = .7f)))
+        if (showDetail) Column(Modifier.weight(1f).fillMaxHeight().background(b.window.mul(.7f))) {
             val cat = CATS.first { it.id == page }
-            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                T(cat.label, 20.sp, weight = FontWeight.Light)
+            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = if (compact) 8.dp else 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (compact) {
+                    Box(Modifier.size(34.dp).breezeClickable(6.dp) { showPage = false }, contentAlignment = Alignment.Center) { BreezeIcon("arrowL", 18.dp, b.text) }
+                    Spacer(Modifier.width(6.dp))
+                }
+                T(cat.label, if (compact) 18.sp else 20.sp, weight = FontWeight.Light, maxLines = 1)
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(b.line.copy(alpha = .6f)))
             val p = remember(page) { Animatable(0f) }
             LaunchedEffect(page) { p.animateTo(1f, Motion.spec(fx, Motion.LONG)) }
             Column(
                 Modifier.weight(1f).fillMaxWidth().graphicsLayer { alpha = p.value; translationY = (1f - p.value) * 14f }
-                    .verticalScroll(rememberScrollState()).padding(20.dp),
+                    .verticalScroll(rememberScrollState()).padding(if (compact) 12.dp else 20.dp),
             ) {
                 when (page) {
                     "highlights" -> HighlightsPage(session)
@@ -141,19 +141,20 @@ fun SettingsApp(session: DesktopSession) {
             }
         }
     }
+    }
 }
 
 @Composable
 private fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val b = LocalBreeze.current
-    Column(modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(8.dp)).background(b.view.copy(alpha = .6f))
+    Column(modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(8.dp)).background(b.view.mul(.6f))
         .border(1.dp, b.line.copy(alpha = .6f), RoundedCornerShape(8.dp)).padding(14.dp), content = content)
 }
 
 @Composable
 private fun Tile(label: String, glyph: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val b = LocalBreeze.current
-    Column(modifier.clip(RoundedCornerShape(8.dp)).background(b.view.copy(alpha = .6f)).border(1.dp, b.line.copy(alpha = .6f), RoundedCornerShape(8.dp))
+    Column(modifier.clip(RoundedCornerShape(8.dp)).background(b.view.mul(.6f)).border(1.dp, b.line.copy(alpha = .6f), RoundedCornerShape(8.dp))
         .breezeClickable(8.dp) { onClick() }.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         BreezeIcon(glyph, 28.dp, b.accent)
         T(label, 12.sp, maxLines = 2, align = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
@@ -195,7 +196,7 @@ private fun ThemesPage(session: DesktopSession) {
                         }
                         Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp).size(120.dp, 10.dp).clip(RoundedCornerShape(3.dp)).background(Color(t.view).copy(alpha = .85f)))
                     }
-                    Column(Modifier.background(b.view.copy(alpha = .8f)).padding(10.dp)) {
+                    Column(Modifier.background(b.view.mul(.8f)).padding(10.dp)) {
                         T(t.label, 13.sp, weight = FontWeight.SemiBold, maxLines = 1)
                         T(t.author, 11.sp, b.dim, maxLines = 1)
                     }
@@ -240,6 +241,8 @@ private fun EffectsPage(session: DesktopSession) {
     val st = session.app.settings; val b = LocalBreeze.current
     val gpu by session.compositor.info.collectAsState()
     if (!gpu.ready) Card { T("Compositor GPU indisponível${if (gpu.error.isNotEmpty()) ": ${gpu.error}" else ""}. O desfoque real fica desligado; a transparência usa um fallback.", 12.sp, b.negative) }
+    SectionTitle("Modo Glass")
+    SwitchRow("Modo Glass", st.bool(Keys.FX_GLASS, false), "Painel, menus, janelas e apps do KDE com só 10% de opacidade (bem clarinho), sobre o desfoque real do fundo. Funciona melhor com o desfoque ligado.") { st.put(Keys.FX_GLASS, it) }
     SectionTitle("Desfoque e transparência")
     SwitchRow("Desfoque do fundo (Dual Kawase)", st.bool(Keys.FX_BLUR, true), "Desfoca o papel de parede atrás de painéis, menus e janelas translúcidas.") { st.put(Keys.FX_BLUR, it) }
     SliderRow("Intensidade do desfoque", st.float(Keys.FX_BLUR_STRENGTH, 0.6f), 0f..1f, "${(st.float(Keys.FX_BLUR_STRENGTH, 0.6f) * 100).roundToInt()}%") { st.put(Keys.FX_BLUR_STRENGTH, it) }
@@ -261,6 +264,8 @@ private fun PanelPage(session: DesktopSession) {
     SwitchRow("Painel flutuante", st.bool(Keys.PANEL_FLOATING, true), "Margem ao redor e cantos arredondados, como no Plasma 6.") { st.put(Keys.PANEL_FLOATING, it) }
     SwitchRow("Opacidade adaptativa", st.bool(Keys.PANEL_ADAPTIVE, true), "O painel fica opaco quando uma janela está maximizada.") { st.put(Keys.PANEL_ADAPTIVE, it) }
     SwitchRow("Painel no topo", st.bool(Keys.PANEL_TOP, false)) { st.put(Keys.PANEL_TOP, it) }
+    Choice("Ícones da bandeja (rede, som, notificações…)", listOf("auto" to "Recolher com a tela em pé (^)", "always" to "Sempre recolhidos (^)", "never" to "Sempre visíveis"),
+        st.string(Keys.PANEL_TRAY_MODE, "auto")) { st.put(Keys.PANEL_TRAY_MODE, it) }
     if (st.bool(Keys.PANEL_FLOATING, true)) {
         val m = st.int(Keys.PANEL_MARGIN, U.DEFAULT_PANEL_MARGIN_DP)
         val r = st.int(Keys.PANEL_RADIUS, U.DEFAULT_PANEL_RADIUS_DP)
@@ -307,18 +312,26 @@ private fun TerminalPage(session: DesktopSession) {
     SwitchRow("Executar fastfetch ao abrir", st.bool(Keys.TERM_FASTFETCH, true), "Mostra o logotipo do Android e dados reais do aparelho (CPU, GPU, OpenGL, memória…).") { st.put(Keys.TERM_FASTFETCH, it) }
     SectionTitle("Apps gráficos Linux")
     SwitchRow(
-        "Usar X11 (Xwayland) em vez de Wayland nativo",
+        "Usar X11 (servidor próprio do PlasmaDroid) em vez de Wayland nativo",
         st.string(Keys.GFX_SERVER, "wayland") == "x11",
-        "Desligado: Wayland nativo (mais rápido, recomendado). Ligado: o Konsole exporta DISPLAY=:0 e inicia o Xwayland (rootful) numa janela, " +
-            "para apps que só falam X11. Requer `apt-get install xwayland openbox` no Debian e reabrir o Konsole. Também dá para iniciar manualmente com `plasma-x11`."
+        "Desligado: Wayland nativo (mais rápido, recomendado). Ligado: o PlasmaDroid roda um servidor X11 nativo; cada janela X11 vira uma janela do desktop, como as Wayland. O Konsole exporta DISPLAY=:0. " +
+            "Comandos no Konsole: `plasma-x11 start` / `plasma-x11 stop`, `plasma-x11 run <app>` (app X11 direto) e `plasma-x11 --status`. Apps X11 abertos no desktop já recebem DISPLAY=:0."
     ) { st.put(Keys.GFX_SERVER, if (it) "x11" else "wayland") }
+    SectionTitle("Saída Wayland")
+    SwitchRow(
+        "Sincronizar resolução com a janela",
+        st.bool(Keys.WAYLAND_SYNC_SIZE, false),
+        "Ligado: a resolução de saída do Wayland acompanha o tamanho do desktop sempre que ele muda (arrastar, girar a tela). Desligado: resolução fixa em 1280×720."
+    ) { st.put(Keys.WAYLAND_SYNC_SIZE, it) }
     BreezeButton("Abrir o Konsole", { session.openTool("terminal") }, Modifier.padding(top = 8.dp), primary = true)
 }
 
 @Composable
 private fun ScalePage(session: DesktopSession) {
     val st = session.app.settings; val b = LocalBreeze.current
-    val saved = st.float(Keys.UI_SCALE, Keys.DEFAULT_UI_SCALE).coerceIn(Keys.MIN_UI_SCALE, Keys.MAX_UI_SCALE)
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val auto = UiScale.isAuto(st)
+    val saved = UiScale.effective(ctx, st)
     var pending by remember { mutableStateOf(false) }
     var prev by remember { mutableFloatStateOf(saved) }
     var left by remember { mutableIntStateOf(15) }
@@ -330,7 +343,10 @@ private fun ScalePage(session: DesktopSession) {
     }
     fun change(v: Float) { if (!pending && kotlin.math.abs(v - saved) > 0.001f) { prev = saved; st.put(Keys.UI_SCALE, v); pending = true } }
     SectionTitle("Escala da interface")
-    Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 6.dp)) {
+    SwitchRow("Escala automática", auto, "Ajusta texto e tamanhos à tela deste aparelho (agora ${(saved * 100).roundToInt()}%).") {
+        if (it) st.put(Keys.UI_SCALE_AUTO, true) else { st.put(Keys.UI_SCALE, saved); st.put(Keys.UI_SCALE_AUTO, false) }
+    }
+    if (!auto) Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 6.dp)) {
         listOf(0.5f, 0.6f, 0.75f, 0.9f, 1f, 1.15f, 1.25f, 1.5f, 1.75f, 2f).forEach { v ->
             val on = kotlin.math.abs(saved - v) < 0.01f
             Box(Modifier.padding(end = 6.dp).clip(RoundedCornerShape(6.dp)).background(if (on) b.accent else b.hover)
@@ -338,12 +354,11 @@ private fun ScalePage(session: DesktopSession) {
                 .padding(horizontal = 14.dp, vertical = 8.dp)) { T("${(v * 100).roundToInt()}%", 12.sp, if (on) b.onAccent else b.text) }
         }
     }
-    SliderRow("Ajuste fino", saved, Keys.MIN_UI_SCALE..Keys.MAX_UI_SCALE, "${(saved * 100).roundToInt()}%") { change((it * 20).roundToInt() / 20f) }
-    if (pending) Card {
+    if (!auto) SliderRow("Ajuste fino", saved, Keys.MIN_UI_SCALE..Keys.MAX_UI_SCALE, "${(saved * 100).roundToInt()}%") { change((it * 20).roundToInt() / 20f) }
+    if (!auto && pending) Card {
         T("Manter esta escala? Voltando automaticamente em $left s…", 13.sp, weight = FontWeight.Medium)
-        Row(Modifier.padding(top = 8.dp)) {
+        ButtonRow(Modifier.padding(top = 8.dp)) {
             BreezeButton("Manter", { pending = false }, primary = true)
-            Spacer(Modifier.width(8.dp))
             BreezeButton("Reverter", { st.put(Keys.UI_SCALE, prev); pending = false })
         }
     }

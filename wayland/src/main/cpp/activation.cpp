@@ -1,3 +1,4 @@
+
 #include "labwc.h"
 extern "C" {
 #include "xdg-activation-v1-protocol.h"

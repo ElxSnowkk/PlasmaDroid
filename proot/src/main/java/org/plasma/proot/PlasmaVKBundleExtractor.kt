@@ -1,5 +1,3 @@
-// Parte do PlasmaDroid — módulo PlasmaVK.
-// Créditos: baseado no projeto Proot.
 
 package org.plasma.proot
 

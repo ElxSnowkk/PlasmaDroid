@@ -273,13 +273,21 @@ void translate_syscall_exit(Tracee *tracee)
 	    Reg new_reg = (syscall_number == PR_link) ? SYSARG_2 : SYSARG_4;
 	    int err = (int) syscall_result;
 
-	    if (err != -EACCES && err != -EPERM)
+	    int copy_rc;
+
+	    /* Aparelhos diferentes negam link() com errnos diferentes (SELinux/FUSE/f2fs/seccomp). */
+	    if (err != -EACCES && err != -EPERM && err != -EXDEV && err != -ENOSYS &&
+		err != -EOPNOTSUPP && err != -EMLINK)
 		goto end;
 	    if (read_string(tracee, old_path, peek_reg(tracee, MODIFIED, old_reg), PATH_MAX) <= 0
 		|| read_string(tracee, new_path, peek_reg(tracee, MODIFIED, new_reg), PATH_MAX) <= 0)
 		goto end;
-	    if (plasma_link_to_copy(old_path, new_path) == 0)
+	    copy_rc = plasma_link_to_copy(old_path, new_path);
+	    if (copy_rc == 0)
 		status = 0;
+	    else if (copy_rc == -EEXIST || copy_rc == -ENOENT || copy_rc == -ENOTDIR)
+		/* devolve o errno real do link() (o dpkg trata EEXIST/ENOENT; com EACCES ele abortava o pacote) */
+		status = copy_rc;
 	    else
 		goto end;
 	    break;

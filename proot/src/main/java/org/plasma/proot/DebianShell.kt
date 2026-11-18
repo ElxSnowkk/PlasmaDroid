@@ -1,5 +1,3 @@
-// Parte do PlasmaDroid — módulo PlasmaVK.
-// Créditos: baseado no projeto Proot.
 
 package org.plasma.proot
 
@@ -127,7 +125,7 @@ class DebianShell(private val paths: ProotPaths, private val onLine: (String) ->
 
     fun run(cmd: String) {
         val b64 = Base64.getEncoder().encodeToString(cmd.toByteArray(Charsets.UTF_8))
-        send("eval \"\$(printf %s $b64 | base64 -d)\"; printf '\\033]777;plasma;%s;%d\\007' \"\$PWD\" \$?\n")
+        send(". /usr/local/lib/plasma-x11-env.sh 2>/dev/null && __plasma_dpy; eval \"\$(printf %s $b64 | base64 -d)\"; printf '\\033]777;plasma;%s;%d\\007' \"\$PWD\" \$?\n")
     }
 
     fun sendInput(text: String, echo: Boolean = true) { send(text + "\n"); parser.echoLine(if (echo) text else "") }

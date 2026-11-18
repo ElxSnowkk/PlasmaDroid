@@ -18,6 +18,7 @@ uso:
   plasma list                       lista os apps disponíveis
   plasma patch list                 lista os patches e o estado de cada um
   plasma patch apply <nome|all>     (re)aplica um patch
+  plasma repair                     conserta o dpkg (fix-broken, scripts que abortam no PRoot)
   plasma run <comando...>           roda um comando com o ambiente do PlasmaDroid (dbus + wayland + vulkan)
 TXT
 }
@@ -47,6 +48,10 @@ case "§{1:-}" in
       *) usage; exit 1 ;;
     esac
     ;;
+  repair)
+    need_root
+    apply_patch dpkg-systemd; repair_dpkg
+    ;;
   run)
     shift
     [ §# -gt 0 ] || { usage; exit 1; }
@@ -59,10 +64,220 @@ case "§{1:-}" in
     ;;
 esac
 """.replace('§', '$'), true),
-        Entry("usr/local/lib/plasma/lib.sh", """# Funções comuns do "plasma" (carregado com `. lib.sh`). Requer bash.
+        Entry("usr/local/bin/plasma-appimage", """#!/bin/bash
+# plasma-appimage — suporte a AppImage no PlasmaDroid (usado pelo popup do Dolphin; também serve no terminal)
+#   plasma-appimage is   <arquivo>          sai com 0 se for uma AppImage
+#   plasma-appimage info <arquivo>          imprime chave=valor (name, comment, arch, host_arch, icon) e extrai o ícone para o cache
+#   plasma-appimage run  <arquivo> [args]   prepara (cópia executável, se preciso) e executa
+CACHE=/var/cache/plasma/appimage
+say() { echo "[appimage] §*" >&2; }
+
+elf_arch() {
+  case "§(od -An -tx1 -j18 -N1 "§1" 2>/dev/null | tr -d ' \n')" in
+    b7) echo aarch64 ;; 3e) echo x86_64 ;; 28) echo armv7l ;; 03) echo i686 ;; *) echo desconhecida ;;
+  esac
+}
+
+is_appimage() {
+  [ -f "§1" ] || return 1
+  head -c4 "§1" 2>/dev/null | grep -q ELF || return 1
+  [ "§(dd if="§1" bs=1 skip=8 count=2 2>/dev/null | tr -d '\0')" = AI ] && return 0
+  case "§{1,,}" in *.appimage) return 0 ;; esac
+  return 1
+}
+
+# o armazenamento do Android (/sdcard) é noexec: copia para o home do guest e executa a cópia
+runnable() {
+  local f="§1" dest
+  case "§f" in
+    /sdcard/*|/storage/*|/mnt/*)
+      dest="§HOME/.local/share/appimages/§(basename "§f")"
+      mkdir -p "§(dirname "§dest")"
+      if [ ! -f "§dest" ] || [ "§(stat -c %s "§f")" != "§(stat -c %s "§dest")" ] || [ "§f" -nt "§dest" ]; then
+        say "copiando para §dest (o armazenamento do Android não permite executar)"
+        cp -f "§f" "§dest" || return 1
+      fi
+      chmod +x "§dest"; echo "§dest" ;;
+    *) chmod +x "§f" 2>/dev/null; echo "§f" ;;
+  esac
+}
+
+# offset do squashfs = fim do ELF (e_shoff + e_shentsize * e_shnum), o mesmo cálculo do runtime da AppImage
+sqfs_offset() {
+  readelf -h "§1" 2>/dev/null | awk -F: '
+    /Start of section headers/ {o=§2+0} /Size of section headers/ {s=§2+0} /Number of section headers/ {n=§2+0}
+    END { if (s>0 && n>0) printf "%d", o + s*n }'
+}
+
+# extrai só o necessário (sem executar a AppImage: serve também para x86_64 neste aparelho)
+extract_meta() {
+  local f="§1" out="§2" off list root desk icon cand tgt
+  off=§(sqfs_offset "§f"); [ -n "§off" ] || return 1
+  command -v unsquashfs >/dev/null 2>&1 || return 1
+  list=§(unsquashfs -o "§off" -l "§f" 2>/dev/null | sed 's#^squashfs-root/\?##' | grep -v '^§') || return 1
+  [ -n "§list" ] || return 1
+  root="§out/root"; mkdir -p "§root"
+  desk=§(echo "§list" | grep -E '^[^/]+\.desktop§' | head -1)
+  [ -n "§desk" ] || desk=§(echo "§list" | grep -E '^usr/share/applications/[^/]+\.desktop§' | head -1)
+  [ -n "§desk" ] && unsquashfs -o "§off" -f -d "§root" "§f" "§desk" >/dev/null 2>&1
+  [ -n "§desk" ] && cp -f "§root/§desk" "§out/app.desktop" 2>/dev/null
+  icon=§(sed -n 's/^Icon=//p' "§out/app.desktop" 2>/dev/null | head -1 | tr -d '\r')
+  cand=""
+  if [ -n "§icon" ]; then
+    # prefere o maior PNG do hicolor; depois PNG/SVG na raiz
+    cand=§(echo "§list" | grep -E "(^|/)§{icon//./\\.}\.png§" | awk '{ n=0; if (match(§0,/[0-9]+x[0-9]+/)) n=substr(§0,RSTART,RLENGTH)+0; print n, §0 }' | sort -rn | head -1 | cut -d' ' -f2-)
+    [ -n "§cand" ] || cand=§(echo "§list" | grep -E "(^|/)§{icon//./\\.}\.svg§" | head -1)
+  fi
+  [ -n "§cand" ] || cand=§(echo "§list" | grep -E '^[^/]+\.png§' | head -1)
+  [ -n "§cand" ] || cand=§(echo "§list" | grep -x '\.DirIcon' | head -1)
+  [ -n "§cand" ] || return 0
+  unsquashfs -o "§off" -f -d "§root" "§f" "§cand" >/dev/null 2>&1
+  if [ -L "§root/§cand" ]; then            # .DirIcon costuma ser um link para o ícone real
+    tgt=§(readlink "§root/§cand"); tgt="§{tgt#./}"
+    case "§tgt" in /*) tgt="§{tgt#/}" ;; *) [ "§(dirname "§cand")" != . ] && tgt="§(dirname "§cand")/§tgt" ;; esac
+    unsquashfs -o "§off" -f -d "§root" "§f" "§tgt" >/dev/null 2>&1
+    [ -f "§root/§tgt" ] && cand="§tgt"
+  fi
+  [ -f "§root/§cand" ] && echo "§root/§cand" > "§out/icon.src"
+  return 0
+}
+
+# alternativa: a própria AppImage (tipo 2) extrai arquivos com --appimage-extract (só arquitetura compatível)
+extract_meta_run() {
+  local f="§1" out="§2" run tmp icon
+  run=§(runnable "§f") || return 1
+  tmp=§(mktemp -d)
+  ( cd "§tmp" && APPIMAGE_EXTRACT_AND_RUN=1 timeout 90 "§run" --appimage-extract '*.desktop' >/dev/null 2>&1
+    APPIMAGE_EXTRACT_AND_RUN=1 timeout 90 "§run" --appimage-extract '.DirIcon' >/dev/null 2>&1
+    APPIMAGE_EXTRACT_AND_RUN=1 timeout 90 "§run" --appimage-extract '*.png' >/dev/null 2>&1 )
+  cp -f "§(ls "§tmp"/squashfs-root/*.desktop 2>/dev/null | head -1)" "§out/app.desktop" 2>/dev/null
+  icon=§(sed -n 's/^Icon=//p' "§out/app.desktop" 2>/dev/null | head -1 | tr -d '\r')
+  for c in "§tmp/squashfs-root/§icon.png" "§tmp/squashfs-root/.DirIcon" "§(ls "§tmp"/squashfs-root/*.png 2>/dev/null | head -1)"; do
+    [ -f "§c" ] && { mkdir -p "§out/root"; cp -fL "§c" "§out/root/icon-src"; echo "§out/root/icon-src" > "§out/icon.src"; break; }
+  done
+  rm -rf "§tmp"
+}
+
+to_png() {  # §1 origem (png/svg/xpm), §2 destino png (256px)
+  case "§1" in
+    *.svg) if command -v rsvg-convert >/dev/null 2>&1; then rsvg-convert -w 256 -h 256 -o "§2" "§1" 2>/dev/null
+           elif command -v convert >/dev/null 2>&1; then convert -background none -resize 256x256 "§1" "§2" 2>/dev/null; else return 1; fi ;;
+    *) if head -c8 "§1" 2>/dev/null | grep -q PNG; then cp -f "§1" "§2"
+       elif command -v convert >/dev/null 2>&1; then convert "§1" -resize 256x256 "§2" 2>/dev/null; else return 1; fi ;;
+  esac
+  [ -s "§2" ]
+}
+
+# unsquashfs/readelf extraem o ícone sem executar a AppImage; instala uma vez se faltarem (o Setup novo já instala)
+need_tools() {
+  command -v unsquashfs >/dev/null 2>&1 && command -v readelf >/dev/null 2>&1 && return 0
+  [ -f /var/lib/plasma/appimage-tools-tried ] && return 1
+  mkdir -p /var/lib/plasma; touch /var/lib/plasma/appimage-tools-tried
+  say "instalando squashfs-tools e binutils (uma vez)..."
+  if [ -f /usr/local/lib/plasma/lib.sh ]; then
+    ( . /usr/local/lib/plasma/lib.sh; apt_install squashfs-tools binutils librsvg2-bin ) >/dev/null 2>&1
+  else
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends squashfs-tools binutils librsvg2-bin >/dev/null 2>&1
+  fi
+  command -v unsquashfs >/dev/null 2>&1
+}
+
+cmd_info() {
+  local f="§1" k out name comment src
+  echo "arch=§(elf_arch "§f")"; echo "host_arch=§(uname -m)"
+  need_tools || true
+  k=§(printf '%s|%s|%s' "§f" "§(stat -c %Y "§f")" "§(stat -c %s "§f")" | sha1sum | cut -c1-16)
+  out="§CACHE/§k"; mkdir -p "§out"
+  if [ ! -f "§out/done" ]; then
+    rm -rf "§out/root" "§out/icon.src" "§out/icon.png" "§out/app.desktop"
+    extract_meta "§f" "§out" || true
+    [ -f "§out/icon.src" ] || [ -f "§out/app.desktop" ] || extract_meta_run "§f" "§out" || true
+    [ -f "§out/icon.src" ] && { src=§(cat "§out/icon.src"); to_png "§src" "§out/icon.png" || rm -f "§out/icon.png"; }
+    rm -rf "§out/root"; touch "§out/done"
+  fi
+  name=§(sed -n 's/^Name=//p' "§out/app.desktop" 2>/dev/null | head -1 | tr -d '\r')
+  comment=§(sed -n 's/^Comment=//p' "§out/app.desktop" 2>/dev/null | head -1 | tr -d '\r')
+  echo "name=§name"; echo "comment=§comment"
+  [ -s "§out/icon.png" ] && echo "icon=§out/icon.png"
+  return 0
+}
+
+# memfd: o runtime da AppImage faz memfd_create + fexecve, que o Android barra (EACCES: "Failed to exec memfd").
+# Em vez de depender do fallback do runtime, extrai o squashfs com unsquashfs (uma vez, em cache) e executa o AppRun direto.
+# Desligue com PLASMA_APPIMAGE_MODE=runtime.
+extract_dir() {  # §1 = AppImage executável; imprime o diretório extraído (extrai se preciso)
+  local f="§1" off k dir tmp
+  [ "§{PLASMA_APPIMAGE_MODE:-extract}" = runtime ] && return 1
+  need_tools || return 1
+  off=§(sqfs_offset "§f"); [ -n "§off" ] || return 1
+  k=§(printf '%s|%s|%s' "§f" "§(stat -c %Y "§f")" "§(stat -c %s "§f")" | sha1sum | cut -c1-16)
+  dir="§{HOME:-/root}/.local/share/appimages/.extracted/§k"
+  if [ ! -x "§dir/AppRun" ]; then
+    tmp="§dir.tmp"; rm -rf "§tmp" "§dir"; mkdir -p "§(dirname "§dir")"
+    say "extraindo a AppImage (uma vez; evita o memfd bloqueado pelo Android)..."
+    if ! { unsquashfs -no-xattrs -f -d "§tmp" -o "§off" "§f" >/dev/null 2>&1 || { rm -rf "§tmp"; unsquashfs -f -d "§tmp" -o "§off" "§f" >/dev/null 2>&1; }; }; then
+      rm -rf "§tmp"; return 1
+    fi
+    chmod -R u+rwX "§tmp" 2>/dev/null
+    [ -e "§tmp/AppRun" ] || { rm -rf "§tmp"; return 1; }
+    chmod +x "§tmp/AppRun" 2>/dev/null
+    mv "§tmp" "§dir" || return 1
+  fi
+  echo "§dir"
+}
+
+cmd_run() {
+  local f="§1" run rc a dir; shift
+  is_appimage "§f" || { say "não parece uma AppImage: §f"; exit 1; }
+  a=§(elf_arch "§f")
+  if [ "§a" != "§(uname -m)" ] && [ "§a" != desconhecida ]; then
+    if command -v fex-run >/dev/null 2>&1; then say "AppImage §a: executada pelo FEX (fex-run)"
+    else say "aviso: AppImage §a, mas este aparelho é §(uname -m); provavelmente não vai executar (instale o FEX: plasma install fex)"; fi
+  fi
+  run=§(runnable "§f") || exit 1
+  export XDG_RUNTIME_DIR="§{XDG_RUNTIME_DIR:-/run/plasma-wayland}" WAYLAND_DISPLAY="§{WAYLAND_DISPLAY:-wayland-0}"
+  export APPIMAGE_EXTRACT_AND_RUN=1 NO_AT_BRIDGE=1   # sem FUSE no PRoot: a AppImage se extrai para /tmp e roda de lá
+  say "executando: §run §{PLASMA_APPIMAGE_ARGS:-} §*"
+  if dir=§(extract_dir "§run") && [ -n "§dir" ]; then
+    export APPIMAGE="§run" APPDIR="§dir" ARGV0="§run" OWD="§PWD"
+    export PATH="§dir/usr/bin:§PATH"
+    "§dir/AppRun" §{PLASMA_APPIMAGE_ARGS:-} "§@"; rc=§?
+  else
+    "§run" §{PLASMA_APPIMAGE_ARGS:-} "§@"; rc=§?
+  fi
+  if [ "§rc" -ne 0 ]; then
+    say "saiu com código §rc"
+    say "dicas: apps Electron como root precisam de   PLASMA_APPIMAGE_ARGS=--no-sandbox plasma-appimage run <arquivo>"
+    say "       apps GTK/Qt sem Wayland: GDK_BACKEND=x11 / QT_QPA_PLATFORM=xcb com o servidor X11 nativo (plasma-x11 start)"
+  fi
+  exit "§rc"
+}
+
+case "§{1:-}" in
+  is)   is_appimage "§{2:-}" ;;
+  info) is_appimage "§{2:-}" || { echo "appimage=0"; exit 1; }; echo "appimage=1"; cmd_info "§2" ;;
+  run)  [ -n "§{2:-}" ] || { echo "uso: plasma-appimage run <arquivo> [args]"; exit 2; }; f="§2"; shift 2; cmd_run "§f" "§@" ;;
+  *)    sed -n '2,6p' "§0" | sed 's/^# \?//'; exit 2 ;;
+esac
+""".replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/lib.sh", """# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
 L=/usr/local/lib/plasma
 STATE=/var/lib/plasma
-BASE_PATCHES="dpkg-systemd dbus-session gl-vulkan wayland-env"
+BASE_PATCHES="dns os-arch quiet dpkg-systemd dbus-session gl-vulkan wayland-env adwaita-icons"
 
 say() { echo "[plasma] §*"; }
 need_root() { [ "§(id -u)" = 0 ] || { say "rode como root"; exit 1; }; }
@@ -111,43 +326,120 @@ apply_base_patches() {
   for p in §BASE_PATCHES; do apply_patch "§p" || return 1; done
 }
 
-# Neutraliza o postinst dos pacotes que abortaram com status 134
-# (systemd: Assertion 'mntid >= 0' failed). Lê o log do dpkg em §1.
-# Retorna 0 se tratou algum pacote.
 heal() {
-  local n=0 pkg base f
-  while read -r pkg; do
+  local n=0 pkg ph base f
+  while read -r pkg ph; do
     [ -n "§pkg" ] || continue
     base="§{pkg%%:*}"
-    for f in "/var/lib/dpkg/info/§pkg.postinst" "/var/lib/dpkg/info/§base.postinst"; do
+    for f in "/var/lib/dpkg/info/§pkg.§ph" "/var/lib/dpkg/info/§base.§ph"; do
       [ -f "§f" ] || continue
       grep -q 'plasma-stub' "§f" && continue
       mkdir -p "§STATE/postinst-orig"
       cp "§f" "§STATE/postinst-orig/§(basename "§f")"
       printf '#!/bin/sh\n# plasma-stub\nexit 0\n' > "§f"; chmod 755 "§f"
-      n=§((n+1)); say "postinst de §pkg ignorado (abort do systemd no PRoot)"
+      n=§((n+1)); say "§ph de §pkg ignorado (falha no PRoot)"
     done
-  done < <(awk '/error processing package/ {p=§5} /post-installation script subprocess returned error exit status 134/ && p!="" {print p; p=""}' "§1" | sort -u)
+  done < <(awk '/error processing package/ {p=§5}
+    /script subprocess returned error exit status/ && p!="" {
+      ph = (§0 ~ /pre-installation/) ? "preinst" : (§0 ~ /pre-removal/) ? "prerm" : (§0 ~ /post-removal/) ? "postrm" : "postinst"
+      print p, ph; p=""
+    }' "§1" | sort -u)
   [ "§n" -gt 0 ]
 }
 
-# apt install tolerante: se um postinst abortar (134), ignora e continua.
-apt_install() {
-  local log=/tmp/plasma-apt.log try rc
+APT_OPTS=(-o DPkg::Lock::Timeout=900 -o Acquire::Retries=5 -o Acquire::By-Hash=yes -o Acquire::http::Pipeline-Depth=0
+          -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef)
+
+repair_dpkg() {
+  local log=/tmp/plasma-dpkg.log try rc f
+  for f in /usr/bin/* /usr/sbin/* /usr/lib/dpkg/*; do [ -f "§f" ] && [ ! -x "§f" ] && chmod 755 "§f"; done
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update || say "aviso: apt-get update falhou, tentando mesmo assim"
-  for try in 1 2 3 4 5 6; do
-    apt-get install -y "§@" 2>&1 | tee "§log"; rc=§{PIPESTATUS[0]}
+  for try in 1 2 3; do
+    dpkg --configure -a --force-confold --force-confdef 2>&1 | tee "§log"; rc=§{PIPESTATUS[0]}
+    if [ "§rc" -ne 0 ]; then heal "§log" && continue; fi
+    apt-get "§{APT_OPTS[@]}" -f install -y --fix-missing 2>&1 | tee "§log"; rc=§{PIPESTATUS[0]}
     [ "§rc" -eq 0 ] && return 0
     heal "§log" || break
-    dpkg --configure -a 2>&1 | tee "§log" || true
+  done
+  say "dpkg ainda inconsistente:"; dpkg --audit 2>&1 | head -20
+  return 1
+}
+
+apt_install() {
+  local log=/tmp/plasma-apt.log try rc upgraded=0
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get "§{APT_OPTS[@]}" update || say "aviso: apt-get update falhou, tentando mesmo assim"
+  repair_dpkg >/dev/null 2>&1 || true
+  for try in 1 2 3; do
+    apt-get "§{APT_OPTS[@]}" install -y "§@" 2>&1 | tee "§log"; rc=§{PIPESTATUS[0]}
+    [ "§rc" -eq 0 ] && return 0
+    heal "§log" || true
+    if grep -q 'Unmet dependencies\|not going to be installed\|held broken\|Unable to satisfy' "§log" && [ "§upgraded" = 0 ]; then
+      upgraded=1; say "dependências não resolvidas: alinhando o rootfs com o mirror (full-upgrade)"
+      apt-get "§{APT_OPTS[@]}" full-upgrade -y --fix-missing 2>&1 | tee "§log" || true
+      heal "§log" || true
+    fi
+    repair_dpkg >/dev/null 2>&1 || true
   done
   say "a instalação falhou. Últimas linhas de §log:"; tail -15 "§log"
   return 1
 }
 """.replace('§', '$'), false),
+        Entry("usr/local/lib/plasma/patches/adwaita-icons.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+# desc: tema de ícones Adwaita (GTK) para apps Linux, incluindo o Pi-Apps
+
+set -u
+export DEBIAN_FRONTEND=noninteractive
+
+if ! dpkg -s adwaita-icon-theme >/dev/null 2>&1 || ! dpkg -s hicolor-icon-theme >/dev/null 2>&1; then
+  apt-get install -y --no-install-recommends adwaita-icon-theme hicolor-icon-theme >/dev/null 2>&1 \
+    || { echo "[plasma] falhou ao instalar adwaita-icon-theme"; exit 1; }
+fi
+
+for v in gtk-3.0 gtk-4.0; do
+  mkdir -p "/etc/xdg/§v"
+  printf '[Settings]\ngtk-icon-theme-name=Adwaita\n' > "/etc/xdg/§v/settings.ini"
+done
+
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -q -f /usr/share/icons/Adwaita 2>/dev/null || true
+  gtk-update-icon-cache -q -f /usr/share/icons/hicolor 2>/dev/null || true
+fi
+
+if [ -d /home/plasma ]; then
+  mkdir -p /home/plasma/.config/gtk-3.0
+  printf '[Settings]\ngtk-icon-theme-name=Adwaita\n' > /home/plasma/.config/gtk-3.0/settings.ini
+  chown -R plasma:plasma /home/plasma/.config/gtk-3.0 2>/dev/null || true
+fi
+exit 0
+""".replace('§', '$'), true),
         Entry("usr/local/lib/plasma/patches/dbus-session.sh", """#!/bin/bash
-# desc: barramento D-Bus de sessão que funciona no PRoot (autenticação ANONYMOUS) + comando plasma-dbus
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
 set -u
 mkdir -p /usr/local/lib/plasma
 cat > /usr/local/lib/plasma/dbus-session.conf <<'XML'
@@ -183,13 +475,90 @@ echo "§ADDR"
 SH
 chmod 755 /usr/local/bin/plasma-dbus
 """.replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/patches/dns.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+# DNS do guest. Ordem de preferência:
+#   1) os DNS da rede ativa do aparelho, que o host (HostDns.kt) grava em /var/lib/plasma/host-dns a cada abertura;
+#   2) se eles não resolvem github.com, os DNS públicos (1.1.1.1, 8.8.8.8, ...).
+# Antes este script escrevia 1.1.1.1/8.8.8.8 fixos e mantinha qualquer nameserver que já existisse; em redes que
+# bloqueiam ou interceptam UDP/53 para DNS públicos, o guest ficava sem resolver nada (loja do Pi-Apps vazia).
+# PLASMA_* só existem para testar o script fora do guest.
+set -u
+RESOLV="§{PLASMA_RESOLV:-/etc/resolv.conf}"
+HOSTS="§{PLASMA_HOSTS:-/etc/hosts}"
+HOST_DNS="§{PLASMA_HOST_DNS:-/var/lib/plasma/host-dns}"
+
+# só IPs (v4/v6) gravados pelo host
+host_servers() {
+  [ -s "§HOST_DNS" ] || return 0
+  grep -E '^[0-9A-Fa-f.:]+§' "§HOST_DNS" | head -n 2 | tr '\n' ' ' | sed 's/ *§//'
+}
+current_servers() {
+  [ -f "§RESOLV" ] && [ ! -L "§RESOLV" ] || return 0
+  awk '§1=="nameserver"{print §2}' "§RESOLV" | tr '\n' ' ' | sed 's/ *§//'
+}
+write_resolv() {
+  local tmp="§RESOLV.plasma-tmp" s
+  : > "§tmp" || return 1
+  for s in "§@"; do echo "nameserver §s" >> "§tmp"; done
+  echo "options timeout:2 attempts:3" >> "§tmp"
+  rm -f "§RESOLV"; mv "§tmp" "§RESOLV"
+}
+resolves() { getent hosts github.com >/dev/null 2>&1 && getent hosts raw.githubusercontent.com >/dev/null 2>&1; }
+
+HOSTDNS=§(host_servers)
+WANT="§{HOSTDNS:-1.1.1.1 8.8.8.8 9.9.9.9}"
+if [ "§(current_servers)" != "§WANT" ]; then
+  set -- §WANT; write_resolv "§@"
+fi
+if ! resolves; then
+  for set in "1.1.1.1 8.8.8.8" "8.8.8.8 8.8.4.4" "9.9.9.9 149.112.112.112" "94.140.14.14 208.67.222.222"; do
+    set -- §set; write_resolv "§@"
+    resolves && break
+  done
+  # nada resolveu: volta para a lista da rede do aparelho (é a que o Android usa)
+  if ! resolves && [ -n "§HOSTDNS" ]; then set -- §HOSTDNS; write_resolv "§@"; fi
+fi
+grep -qE '^127\.0\.0\.1[[:space:]]+localhost' /etc/hosts 2>/dev/null || echo "127.0.0.1 localhost" >> /etc/hosts
+grep -qE '^::1[[:space:]]' /etc/hosts 2>/dev/null || echo "::1 localhost ip6-localhost ip6-loopback" >> /etc/hosts
+h=§(cat /etc/hostname 2>/dev/null); [ -n "§h" ] && ! grep -qw "§h" /etc/hosts && echo "127.0.1.1 §h" >> /etc/hosts
+if resolves; then exit 0; fi
+echo "[plasma] dns: não consegui resolver github.com (sem internet no Android/Wi-Fi?). O resolv.conf foi ajustado; teste: getent hosts github.com" >&2
+exit 0
+""".replace('§', '$'), true),
         Entry("usr/local/lib/plasma/patches/dpkg-systemd.sh", """#!/bin/bash
-# desc: dpkg sem systemd real: stubs de sysusers/tmpfiles, policy-rc.d e usuário messagebus (mount id + audit no PRoot)
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
 set -u
 printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d; chmod 755 /usr/sbin/policy-rc.d
 
-# systemd-sysusers/tmpfiles abortam com "Assertion 'mntid >= 0' failed" quando o mount id não está disponível.
-# O divert vale também para quando o pacote systemd ainda vai ser instalado.
 for b in systemd-sysusers systemd-tmpfiles; do
   p=/usr/bin/§b
   if ! dpkg-divert --list 2>/dev/null | grep -q "diversion of §p to"; then
@@ -198,8 +567,6 @@ for b in systemd-sysusers systemd-tmpfiles; do
   printf '#!/bin/sh\nexit 0\n' > "§p"; chmod 755 "§p"
 done
 
-# useradd/groupadd falham com "Cannot open audit interface" (netlink de auditoria bloqueado pelo Android):
-# cria os usuários de sistema direto nos arquivos.
 ensure_sys_user() {
   local n="§1" id gid
   getent passwd "§n" >/dev/null && return 0
@@ -220,7 +587,21 @@ ensure_sys_user() {
 ensure_sys_user messagebus
 """.replace('§', '$'), true),
         Entry("usr/local/lib/plasma/patches/gl-vulkan.sh", """#!/bin/bash
-# desc: OpenGL pelo Incandescent (GL -> GLES do aparelho, com ANGLE -> Vulkan opcional) como único driver GL e padrão do guest; teste por etapas; comando plasma-gl
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
 set -u
 mkdir -p /usr/local/lib/plasma /var/lib/plasma
 cat > /usr/local/bin/plasma-gl <<'SH'
@@ -558,17 +939,237 @@ case "§{1:-env}" in
 esac
 SH
 chmod 755 /usr/local/bin/plasma-gl
-rm -f /var/lib/plasma/gl-backend   # refaz o teste no próximo uso
+rm -f /var/lib/plasma/gl-backend
 /usr/local/bin/plasma-gl default on >/dev/null 2>&1 || true
 """.replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/patches/locale.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+set -u
+export DEBIAN_FRONTEND=noninteractive
+command -v locale-gen >/dev/null 2>&1 || apt-get install -y --no-install-recommends locales >/dev/null 2>&1 || true
+if [ -f /etc/locale.gen ]; then
+  for l in en_US.UTF-8 pt_BR.UTF-8; do
+    if grep -q "^# *§l" /etc/locale.gen; then sed -i "s/^# *§l/§l/" /etc/locale.gen
+    elif ! grep -q "^§l" /etc/locale.gen; then echo "§l UTF-8" >> /etc/locale.gen; fi
+  done
+fi
+locale-gen >/dev/null 2>&1 || true
+printf 'LANG=C.UTF-8\n' > /etc/default/locale
+for l in en_US pt_BR; do
+  if [ -d /usr/lib/locale/C.utf8 ] && ! LC_ALL="§l.UTF-8" locale charmap 2>/dev/null | grep -qi '^utf-8§'; then
+    rm -rf "/usr/lib/locale/§l.utf8" "/usr/lib/locale/§l.UTF-8"
+    ln -s C.utf8 "/usr/lib/locale/§l.utf8"
+  fi
+done
+exit 0
+""".replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/patches/os-arch.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+set -u
+mkdir -p /usr/sbin
+if [ ! -e /usr/sbin/init ]; then
+  rm -f /usr/sbin/init
+  ln -s /usr/bin/bash /usr/sbin/init
+fi
+[ -e /sbin/init ] || { [ -d /sbin ] && ln -s /usr/bin/bash /sbin/init 2>/dev/null; }
+b=§(od -An -t x1 -j4 -N1 /usr/sbin/init 2>/dev/null | tr -d ' \n')
+[ "§b" = 02 ] || { echo "[plasma] os-arch: /usr/sbin/init não é um ELF 64 bits (byte=§b)" >&2; exit 1; }
+exit 0
+""".replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/patches/pi-user.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+set -u
+cat > /usr/local/bin/plasma-as <<'SH'
+#!/bin/bash
+u="§{1:-}"; [ -n "§u" ] || { echo "uso: plasma-as <usuário> [comando...]" >&2; exit 2; }
+shift
+ent=§(getent passwd "§u") || { echo "plasma-as: usuário inexistente: §u" >&2; exit 1; }
+uid=§(echo "§ent" | cut -d: -f3); gid=§(echo "§ent" | cut -d: -f4); home=§(echo "§ent" | cut -d: -f6)
+[ -d "§home" ] || mkdir -p "§home"
+[ §# -gt 0 ] || set -- /bin/bash -l
+run=(env HOME="§home" USER="§u" LOGNAME="§u" SHELL=/bin/bash "§@")
+
+# Raw syscall via perl (pula o wrapper "setxid" da glibc, que sob o PRoot falha com "setresgid failed: Success").
+case "§(uname -m)" in
+  aarch64|arm64) SG=149; SU=147 ;;
+  x86_64)        SG=119; SU=117 ;;
+  arm*)          SG=210; SU=208 ;;
+  i?86)          SG=170; SU=164 ;;
+  *)             SG=; SU= ;;
+esac
+PERL_AS='my(§m,§sg,§su,§g,§u,@c)=@ARGV;
+my §r=syscall(§sg,§g,§g,§g); if(§r!=0 && §m eq "strict"){print STDERR "setresgid: §!\n"; exit 1}
+§r=syscall(§su,§u,§u,§u);    if(§r!=0 && §m eq "strict"){print STDERR "setresuid: §!\n"; exit 1}
+exec {§c[0]} @c; print STDERR "exec: §!\n"; exit 127;'
+
+# via <método> comando...  (sempre faz exec; o teste roda dentro de um subshell)
+via() {
+  local m="§1"; shift
+  case "§m" in
+    setpriv)       exec setpriv --reuid="§uid" --regid="§gid" --clear-groups "§@" ;;
+    runuser)       exec runuser -u "§u" -- "§@" ;;
+    su)            exec su -s /bin/bash "§u" -c 'exec "§@"' -- _ "§@" ;;
+    perl)          exec perl -e "§PERL_AS" strict "§SG" "§SU" "§gid" "§uid" "§@" ;;
+    perl-lenient)  exec perl -e "§PERL_AS" lenient "§SG" "§SU" "§gid" "§uid" "§@" ;;
+  esac
+}
+
+# Usa o primeiro método que realmente funciona neste PRoot (testado com `true` antes de executar o comando de verdade).
+for m in setpriv runuser su perl perl-lenient; do
+  bin="§{m%%-*}"
+  command -v "§bin" >/dev/null 2>&1 || continue
+  case "§m" in perl*) [ -n "§SG" ] || continue ;; esac
+  ( via "§m" env true ) </dev/null >/dev/null 2>&1 || continue
+  via "§m" "§{run[@]}"
+done
+echo "plasma-as: não consegui trocar para o usuário §u (setresgid/setresuid barrado pelo PRoot)" >&2
+exit 1
+SH
+chmod 755 /usr/local/bin/plasma-as
+
+cat > /usr/local/bin/sudo <<'SH'
+#!/bin/bash
+target=root; shell=0
+while [ §# -gt 0 ]; do
+  case "§1" in
+    -u) target="§2"; shift 2 ;;
+    --user=*) target="§{1#*=}"; shift ;;
+    -g|-C|-D|-h|-p|-r|-t|-T|-U) shift 2 ;;
+    -v|-k|-K|-l|--validate|--reset-timestamp) exit 0 ;;
+    -i|-s) shell=1; shift ;;
+    --) shift; break ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+if [ "§(id -un 2>/dev/null)" = "§target" ] || { [ "§(id -u)" = 0 ] && [ "§target" = root ]; }; then
+  [ §# -gt 0 ] && exec "§@"
+  exec /bin/bash -l
+fi
+if [ §# -eq 0 ]; then set -- /bin/bash -l; fi
+exec /usr/local/bin/plasma-as "§target" "§@"
+SH
+chmod 755 /usr/local/bin/sudo
+
+U=plasma; ID=1000
+getent group "§U" >/dev/null || { echo "§U:x:§ID:" >> /etc/group; [ -f /etc/gshadow ] && echo "§U:!::" >> /etc/gshadow; }
+if ! getent passwd "§U" >/dev/null; then
+  echo "§U:x:§ID:§ID:Plasma:/home/§U:/bin/bash" >> /etc/passwd
+  [ -f /etc/shadow ] && echo "§U:*:20000:0:99999:7:::" >> /etc/shadow
+fi
+for g in sudo audio video input render; do
+  getent group "§g" >/dev/null && ! getent group "§g" | grep -q "[:,]§U\(,\|\§\)" && sed -i "s/^\(§g:.*[^:]\)\§/\1,§U/;s/^\(§g:.*:\)\§/\1§U/" /etc/group
+done
+mkdir -p "/home/§U" /etc/sudoers.d
+[ -f "/home/§U/.bashrc" ] || cp /etc/skel/.bashrc "/home/§U/.bashrc" 2>/dev/null || true
+grep -q '# plasmadroid' "/home/§U/.bashrc" 2>/dev/null || printf '\n# plasmadroid\nexport LANG=C.UTF-8\n' >> "/home/§U/.bashrc"
+chown -R "§ID:§ID" "/home/§U" 2>/dev/null || true
+echo "§U ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/§U"; chmod 440 "/etc/sudoers.d/§U"
+exit 0
+""".replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/patches/quiet.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+set -u
+mkdir -p /opt /usr/local/bin /usr/local/share/applications /usr/local/share/icons
+cat > /etc/profile.d/plasma-quiet.sh <<'SH'
+# PlasmaDroid: ambiente que evita avisos/erros barulhentos
+case ":§{XDG_DATA_DIRS:-}:" in
+  *:/usr/local/share:*) ;;
+  *) export XDG_DATA_DIRS="/usr/local/share:§{XDG_DATA_DIRS:-/usr/share}" ;;
+esac
+export NO_AT_BRIDGE=1
+SH
+chmod 644 /etc/profile.d/plasma-quiet.sh
+for rc in /etc/bash.bashrc; do
+  [ -f "§rc" ] || continue
+  grep -q 'plasma-quiet.sh' "§rc" || printf '\n[ -f /etc/profile.d/plasma-quiet.sh ] && . /etc/profile.d/plasma-quiet.sh\n' >> "§rc"
+done
+for h in /root /home/plasma; do
+  [ -d "§h" ] || continue
+  [ -d "§h/Desktop" ] || { rm -f "§h/Desktop"; mkdir -p "§h/Desktop"; }
+  [ "§h" = /root ] || chown "§(stat -c %u:%g "§h")" "§h/Desktop" 2>/dev/null
+done
+exit 0
+""".replace('§', '$'), true),
         Entry("usr/local/lib/plasma/patches/wayland-env.sh", """#!/bin/bash
-# desc: ambiente padrão de apps Qt/KDE (Wayland do PlasmaDroid, D-Bus, OpenGL pelo Incandescent) em env.sh
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
 set -u
 mkdir -p /usr/local/lib/plasma
 cat > /usr/local/lib/plasma/env.sh <<'SH'
 # carregado por `plasma run` e pelos launchers de apps (. env.sh)
 export XDG_RUNTIME_DIR="§{XDG_RUNTIME_DIR:-/run/plasma-wayland}"
 export WAYLAND_DISPLAY="§{WAYLAND_DISPLAY:-wayland-0}"
+case ":§{XDG_DATA_DIRS:-}:" in *:/usr/local/share:*) ;; *) export XDG_DATA_DIRS="/usr/local/share:§{XDG_DATA_DIRS:-/usr/share}" ;; esac
 export QT_QPA_PLATFORM="§{QT_QPA_PLATFORM:-wayland}"
 export QSG_RHI_BACKEND="§{QSG_RHI_BACKEND:-vulkan}"   # apps que forçam OpenGL (Kdenlive) ignoram; o launcher deles ajusta
 if command -v plasma-dbus >/dev/null 2>&1; then
@@ -580,8 +1181,319 @@ if [ "§{PLASMA_GL:-auto}" != llvmpipe ] && command -v plasma-gl >/dev/null 2>&1
 fi
 SH
 """.replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/apps/chromium.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+
+. /usr/local/lib/plasma/lib.sh
+need_root
+
+PKGS="chromium mesa-vulkan-drivers vulkan-tools"
+
+apply_base_patches || exit 1
+apt_install §PKGS || exit 1
+
+# Flags padrão do Debian lidas por /usr/bin/chromium. Sem GPU por padrão: o processo de GPU
+# morre no PRoot (drmGetDevices2 sem nós, syscalls interceptadas). Para testar GPU, rode
+# `CHROMIUM_FLAGS=... chromium` ou remova --disable-gpu deste arquivo.
+mkdir -p /etc/chromium.d
+cat > /etc/chromium.d/plasmadroid <<'CFG'
+CHROMIUM_FLAGS="§CHROMIUM_FLAGS --ozone-platform=wayland --disable-gpu --no-sandbox --disable-dev-shm-usage"
+CFG
+
+echo "[chromium] instalado. Abra com: chromium"
+echo "[chromium] GPU/Vulkan: ainda não funciona no PRoot; /dev/dri precisa existir no host Android."
+""".replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/apps/fex.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+# desc: FEX-Emu: roda programas x86-64 num Debian aarch64 (com barra de progresso)
+
+. /usr/local/lib/plasma/lib.sh
+need_root
+
+FEX_TGZ=/usr/local/lib/plasma/fex/fex-aarch64.tar.xz
+FEX_READY=/usr/local/lib/plasma/fex/.ready
+RFS_DIR=/home/plasma/.local/share/fex-emu/RootFS
+RFS_MIN=debian-min
+RFS_ROOT="§RFS_DIR/§RFS_MIN"
+MIN_SQ=/usr/local/lib/plasma/fex/rootfs-debian-min.sqsh
+HOST_SQ=/usr/local/lib/plasma/fex-host/rootfs-debian-min.sqsh
+STAGE2_DONE="§RFS_ROOT/var/lib/plasma-stage2.done"
+UNSQ_LOG=/var/log/plasma-fex-unsquash.log
+STAGE2_LOG=/var/log/plasma-fex-stage2.log
+NPROC=§(nproc 2>/dev/null || echo 1)
+
+rm -f "§FEX_READY"
+fex_cleanup() {
+  local rc=§?
+  if [ "§rc" -ne 0 ]; then
+    rm -f /usr/local/bin/fex-run "§FEX_READY"
+    printf '\n'
+    say "instalação do FEX não terminou (código §rc): launcher removido; rode plasma install fex de novo"
+  fi
+}
+trap fex_cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+pbar() {
+  local cur=§{1:-0} tot=§{2:-1} lbl=§3 t=§4 w=28 pct fill i bar=""
+  [ "§tot" -gt 0 ] 2>/dev/null || tot=1
+  pct=§(( cur * 100 / tot ))
+  [ "§pct" -gt 100 ] && pct=100
+  [ "§pct" -lt 0 ] && pct=0
+  fill=§(( pct * w / 100 ))
+  for ((i = 0; i < w; i++)); do
+    if [ "§i" -lt "§fill" ]; then bar+="#"; else bar+="."; fi
+  done
+  printf '\r[plasma] %-36s [%s] %3d%% %4ds' "§lbl" "§bar" "§pct" "§t"
+}
+
+run_bar() {
+  local lbl=§1 tot=§2 probe=§3 pid cur=0 rc t0=§SECONDS
+  shift 3
+  "§@" >>"§RUN_LOG" 2>&1 &
+  pid=§!
+  while kill -0 "§pid" 2>/dev/null; do
+    cur=§(§probe 2>/dev/null)
+    pbar "§{cur:-0}" "§tot" "§lbl" §((SECONDS - t0))
+    sleep 1
+  done
+  wait "§pid"; rc=§?
+  if [ "§rc" -eq 0 ]; then
+    pbar "§tot" "§tot" "§lbl" §((SECONDS - t0))
+  else
+    pbar "§{cur:-0}" "§tot" "§lbl" §((SECONDS - t0))
+    printf '  FALHOU\n'
+    return "§rc"
+  fi
+  printf '\n'
+}
+
+probe_unsq() { grep -o '[0-9]\+%' "§UNSQ_LOG" 2>/dev/null | tail -1 | tr -d '%'; }
+probe_stage2() { grep -c '^Status: install ok installed' "§RFS_ROOT/var/lib/dpkg/status" 2>/dev/null; }
+
+[ -f "§FEX_TGZ" ] || { say "pacote do FEX ausente (§FEX_TGZ): o APK não traz o FEX; gere com scripts/build-fex.sh"; exit 1; }
+[ "§(uname -m)" = aarch64 ] || { say "FEX só roda em aarch64 (este guest é §(uname -m))"; exit 1; }
+
+apply_base_patches || exit 1
+apt_install xz-utils squashfs-tools curl ca-certificates || exit 1
+
+say "extraindo o runtime do FEX em /usr/local"
+tar -C / -xJf "§FEX_TGZ" || { say "falhou ao extrair o FEX"; exit 1; }
+ldconfig 2>/dev/null || true
+[ -x /usr/local/bin/FEXInterpreter ] || { say "FEXInterpreter não apareceu após extrair"; exit 1; }
+
+cat > /usr/local/bin/fex-run <<'FEXRUN'
+#!/bin/bash
+# fex-run <programa x86-64> [args]: executa um binário x86-64 pelo FEX.
+# ~/.fex-emu/profile: compatible | balanced (padrão) | fast.
+# ~/.fex-emu/no-tso-libs: bibliotecas que rodam sem emulação de TSO (uma por linha),
+#   só com TSO ligado. Mantém o resto do programa com TSO: desligar tudo trava jogos Source 2.
+# Cache de JIT em ~/.cache/fex-emu, que sobrevive às reinstalações do rootfs.
+[ §# -gt 0 ] || { echo "uso: fex-run <programa> [args]" >&2; exit 2; }
+H="§{HOME:-/root}"
+CFG_DIR="§H/.fex-emu"
+CACHE_DIR="§H/.cache/fex-emu"
+LIBS="§CFG_DIR/no-tso-libs"
+mkdir -p "§CFG_DIR" "§CACHE_DIR"
+if [ ! -f "§LIBS" ]; then
+  cat > "§LIBS" <<'LIBLIST'
+# Bibliotecas de jogos Source 2 (Dota 2, CS2) que rodam sem TSO. Uma por linha; # comenta.
+libclient.so
+libserver.so
+libengine2.so
+libpanorama.so
+librendersystemvulkan.so
+libmaterialsystem2.so
+libscenesystem.so
+libparticles.so
+libanimationsystem.so
+libvphysics2.so
+libworldrenderer.so
+libmeshsystem.so
+libsoundsystem.so
+libresourcesystem.so
+libpanorama_text_pango.so
+libschemasystem.so
+libvscript.so
+libv8.so
+LIBLIST
+fi
+PERFIL=§(cat "§CFG_DIR/profile" 2>/dev/null || echo balanced)
+case "§PERFIL" in
+  compatible) TSO=1; VTSO=1; MTSO=1; HTSO=1; X87=0 ;;
+  fast)       TSO=0; VTSO=0; MTSO=0; HTSO=0; X87=1 ;;
+  *)          TSO=1; VTSO=0; MTSO=0; HTSO=1; X87=1 ;;
+esac
+VOL=""
+if [ "§TSO" = 1 ]; then
+  VOL=§(grep -v '^[[:space:]]*#' "§LIBS" 2>/dev/null | grep -v '^[[:space:]]*§' | paste -sd: -)
+fi
+RFS=§(sed -n 's/.*"RootFS": *"\([^"]*\)".*/\1/p' "§CFG_DIR/Config.json" 2>/dev/null | head -1)
+[ -n "§RFS" ] || RFS=debian-min
+{
+  printf '{\n  "Config": {\n'
+  printf '    "RootFS": "%s",\n' "§RFS"
+  printf '    "TSOEnabled": "%s",\n' "§TSO"
+  printf '    "VectorTSOEnabled": "%s",\n' "§VTSO"
+  printf '    "MemcpySetTSOEnabled": "%s",\n' "§MTSO"
+  printf '    "HalfBarrierTSOEnabled": "%s",\n' "§HTSO"
+  printf '    "X87ReducedPrecision": "%s",\n' "§X87"
+  [ -n "§VOL" ] && printf '    "ExtendedVolatileMetadata": "%s",\n' "§VOL"
+  printf '    "Multiblock": "1",\n'
+  printf '    "DiskCache": "1"\n'
+  printf '  }\n}\n'
+} > "§CFG_DIR/Config.json.tmp" && mv "§CFG_DIR/Config.json.tmp" "§CFG_DIR/Config.json"
+export FEX_ROOTFS="§H/.local/share/fex-emu/RootFS/§RFS"
+export FEX_APP_CONFIG_LOCATION="§CFG_DIR/"
+export FEX_APP_DATA_LOCATION="§CFG_DIR/"
+export FEX_APP_CACHE_LOCATION="§CACHE_DIR/"
+exec /usr/local/bin/FEXInterpreter "§@"
+FEXRUN
+chmod 755 /usr/local/bin/fex-run
+
+if [ ! -f "§MIN_SQ" ] && [ -f "§HOST_SQ" ]; then
+  mkdir -p "§(dirname "§MIN_SQ")" && cp "§HOST_SQ" "§MIN_SQ.part" && mv "§MIN_SQ.part" "§MIN_SQ"
+fi
+
+X86_NAME=debian-x86
+ROOTFS_FORMATO=1
+X86_ROOT="§RFS_DIR/§X86_NAME"
+ROOTFS_BASE="§{PLASMA_ROOTFS_BASE:-https://github.com/OWNER/REPO/releases/download/debian-x86-rootfs}"
+
+baixar_rootfs_x86() {
+  local tgz=/tmp/debian-x86-rootfs.tar.gz sum=/tmp/debian-x86-rootfs.tar.gz.sha256
+  mkdir -p "§RFS_DIR"
+  say "baixando o rootfs x86-64 pronto (Debian 13): §ROOTFS_BASE"
+  curl -fL --retry 3 -o "§sum" "§ROOTFS_BASE/debian-x86-rootfs.tar.gz.sha256" || return 1
+  curl -fL --retry 3 -C - -o "§tgz" "§ROOTFS_BASE/debian-x86-rootfs.tar.gz" || return 1
+  (cd /tmp && sha256sum -c debian-x86-rootfs.tar.gz.sha256) || { say "checksum do rootfs não bate: baixe de novo"; rm -f "§tgz"; return 1; }
+  say "extraindo o rootfs x86-64"
+  rm -rf "§X86_ROOT.tmp" && mkdir -p "§X86_ROOT.tmp"
+  tar -xzf "§tgz" -C "§X86_ROOT.tmp" || { rm -rf "§X86_ROOT.tmp"; return 1; }
+  printf 'format=%s %s\n' "§ROOTFS_FORMATO" "§(cat "§sum")" > "§X86_ROOT.tmp/.plasma-rootfs"
+  rm -rf "§X86_ROOT" && mv "§X86_ROOT.tmp" "§X86_ROOT"
+  rm -f "§tgz" "§sum"
+}
+
+ROOTFS_X86_OK=0
+case "§ROOTFS_BASE" in
+  *OWNER*|*REPO*) REMOTO_OK=0 ;;
+  *) REMOTO_OK=1 ;;
+esac
+STAMP_ATUAL=§(cat "§X86_ROOT/.plasma-rootfs" 2>/dev/null || true)
+SHA_REMOTO=""
+if [ "§REMOTO_OK" = 1 ]; then
+  SHA_REMOTO=§(curl -fsSL --retry 2 "§ROOTFS_BASE/debian-x86-rootfs.tar.gz.sha256" 2>/dev/null | head -1 || true)
+fi
+if [ -n "§SHA_REMOTO" ] && [ "§STAMP_ATUAL" = "format=§ROOTFS_FORMATO §SHA_REMOTO" ]; then
+  ROOTFS_X86_OK=1
+  say "rootfs x86-64 atualizado (§X86_NAME)"
+elif [ -n "§SHA_REMOTO" ]; then
+  baixar_rootfs_x86 && ROOTFS_X86_OK=1 || say "download do rootfs pronto falhou"
+elif [ -n "§STAMP_ATUAL" ]; then
+  ROOTFS_X86_OK=1
+  say "sem a release do rootfs: usando o que já está instalado (§X86_NAME)"
+else
+  [ "§REMOTO_OK" = 1 ] || say "download do rootfs pronto desativado: defina PLASMA_ROOTFS_BASE com a URL da release"
+fi
+
+ROOTFS_OK=1
+if [ "§ROOTFS_X86_OK" = 1 ]; then
+  mkdir -p /home/plasma/.fex-emu "§X86_ROOT/var/lib"
+  printf '{\n  "Config": {\n    "RootFS": "%s"\n  }\n}\n' "§X86_NAME" > /home/plasma/.fex-emu/Config.json
+  printf 'ok\n' > "§X86_ROOT/var/lib/plasma-stage2.done"
+  chown -R plasma:plasma /home/plasma/.local/share/fex-emu /home/plasma/.fex-emu 2>/dev/null || true
+  say "rootfs x86-64 pronto: segunda etapa do debootstrap não é necessária"
+else
+if [ -f "§MIN_SQ" ] && [ ! -x "§RFS_ROOT/usr/bin/dpkg" ]; then
+  rm -rf "§RFS_ROOT.tmp"; mkdir -p "§RFS_DIR"
+  { echo "== unsquashfs §(date)"; df -h /home/plasma 2>&1; ls -la "§MIN_SQ"; } >"§UNSQ_LOG" 2>&1
+  RUN_LOG=§UNSQ_LOG
+  run_bar "extraindo rootfs x86-64 (§NPROC threads)" 100 probe_unsq \
+    unsquashfs -percentage -processors "§NPROC" -ignore-errors -d "§RFS_ROOT.tmp" "§MIN_SQ" || true
+  if [ -d "§RFS_ROOT.tmp/usr" ]; then
+    rm -rf "§RFS_ROOT"; mv "§RFS_ROOT.tmp" "§RFS_ROOT"
+  else
+    rm -rf "§RFS_ROOT.tmp"; ROOTFS_OK=0
+    say "falhou ao extrair o rootfs mínimo. Log: §UNSQ_LOG (me mande as últimas linhas)"
+  fi
+  if [ "§ROOTFS_OK" = 1 ] && [ ! -f /home/plasma/.fex-emu/Config.json ]; then
+    mkdir -p /home/plasma/.fex-emu
+    printf '{\n  "Config": {\n    "RootFS": "%s"\n  }\n}\n' "§RFS_MIN" > /home/plasma/.fex-emu/Config.json
+  fi
+  chown -R plasma:plasma /home/plasma/.local/share/fex-emu /home/plasma/.fex-emu 2>/dev/null || true
+fi
+
+if [ "§ROOTFS_OK" = 1 ] && [ -x "§RFS_ROOT/debootstrap/debootstrap" ] && [ ! -f "§STAGE2_DONE" ]; then
+  mkdir -p "§RFS_ROOT/etc/dpkg/dpkg.cfg.d" "§RFS_ROOT/etc/apt/apt.conf.d"
+  cat > "§RFS_ROOT/etc/dpkg/dpkg.cfg.d/99plasma-fast" <<'DPKG'
+force-unsafe-io
+path-exclude=/usr/share/man/*
+path-exclude=/usr/share/doc/*
+path-exclude=/usr/share/info/*
+DPKG
+  cat > "§RFS_ROOT/etc/apt/apt.conf.d/99plasma-fast" <<'APT'
+APT::Install-Recommends "false";
+Acquire::Retries "3";
+APT
+  contar_status() { local n; n=§(grep -c "^Status: install ok §1" "§RFS_ROOT/var/lib/dpkg/status" 2>/dev/null); echo "§{n:-0}"; }
+  TOT2=§(( §(contar_status unpacked) + §(contar_status installed) ))
+  [ "§TOT2" -gt 0 ] || TOT2=1
+  RUN_LOG=§STAGE2_LOG
+  if run_bar "configurando rootfs x86-64 (FEX)" "§TOT2" probe_stage2 \
+      env HOME=/home/plasma /usr/local/bin/FEXBash -c '/debootstrap/debootstrap --second-stage'; then
+    printf 'ok\n' > "§STAGE2_DONE"
+  else
+    ROOTFS_OK=0
+    say "segunda etapa do debootstrap falhou (log: §STAGE2_LOG). Rode de novo: plasma install fex"
+  fi
+fi
+
+if [ -x "§RFS_ROOT/usr/bin/dpkg" ]; then
+  say "rootfs mínimo x86-64 presente"
+elif ls -A "§RFS_DIR" 2>/dev/null | grep -q .; then
+  say "rootfs x86-64 já existe"
+else
+  ROOTFS_OK=0
+  say "rootfs mínimo ausente (§MIN_SQ). Gere com scripts/build-fex-rootfs.sh, gere o APK de novo e reinstale o app"
+fi
+fi
+
+touch "§FEX_READY"
+if [ "§ROOTFS_OK" = 1 ]; then say "FEX pronto. Rode programas x86-64 com: fex-run <programa>"
+else say "AVISO: FEX instalado, mas SEM rootfs x86-64"; fi
+""".replace('§', '$'), true),
         Entry("usr/local/lib/plasma/apps/kdenlive.sh", """#!/bin/bash
-# desc: Kdenlive (editor de vídeo) no Wayland do PlasmaDroid, com dbus, OpenGL pelo Incandescent e frei0r
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# PlasmaDroid is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later version.
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
 . /usr/local/lib/plasma/lib.sh
 need_root
 
@@ -614,6 +1526,94 @@ chmod 755 /usr/local/bin/kdenlive
 
 plasma-gl detect --force
 say "Kdenlive instalado. Rode: kdenlive   (plasma-gl status mostra o renderer; PLASMA_VERBOSE=1 kdenlive mostra o log)"
+""".replace('§', '$'), true),
+        Entry("usr/local/lib/plasma/apps/pi-apps.sh", """#!/bin/bash
+# This file belongs to the PlasmaDroid project.
+#
+# Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
+#
+# Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
+# or <https://www.gnu.org/licenses/gpl-3.0.html>.
+
+# Pi-Apps: versão Bash (repositório Botspot/pi-apps, rodado pelo ./gui, X11 nativo do PlasmaDroid por padrão e
+# Wayland como reserva). Não usa binário Go: o repositório Bash traz tudo (apps/, scripts, settings, gui).
+# A pasta ~/pi-apps nunca é apagada: ela pode ter dados do usuário.
+
+. /usr/local/lib/plasma/lib.sh
+need_root
+
+PKGS="libgtk-3-0 libglib2.0-bin adwaita-icon-theme dbus-x11 ca-certificates curl yad xdotool wmctrl x11-utils"
+PIAPPS_HOME=/home/plasma/pi-apps
+PIAPPS_REPO_TGZ=https://github.com/Botspot/pi-apps/archive/refs/heads/master.tar.gz
+
+# baixa o repositório Bash (catálogo + scripts) para ~/pi-apps, se ainda não estiver lá
+ensure_pi_apps_repo() {
+  if [ -d "§PIAPPS_HOME/apps" ] && [ -n "§(ls -A "§PIAPPS_HOME/apps" 2>/dev/null)" ]; then
+    say "repositório do Pi-Apps já está em §PIAPPS_HOME"
+  else
+    local tmp=/tmp/pi-apps-repo.tgz
+    say "baixando o repositório do Pi-Apps (catálogo e scripts) para §PIAPPS_HOME"
+    curl -fsSL --retry 3 --connect-timeout 20 -o "§tmp" "§PIAPPS_REPO_TGZ" || { say "não consegui baixar o repositório do Pi-Apps (rede/DNS?)"; return 1; }
+    mkdir -p "§PIAPPS_HOME" && tar -xzf "§tmp" -C "§PIAPPS_HOME" --strip-components=1 || { rm -f "§tmp"; say "falhou ao extrair o repositório do Pi-Apps"; return 1; }
+    rm -f "§tmp"
+  fi
+  mkdir -p "§PIAPPS_HOME/data" "§PIAPPS_HOME/logs"
+  chown -R plasma:plasma "§PIAPPS_HOME"
+}
+
+apply_base_patches || exit 1
+apply_patch locale || exit 1
+apply_patch pi-user || exit 1
+apt_install §PKGS || exit 1
+
+# remove só restos de instalações antigas (launcher, binário Go e symlink quebrado), nunca a pasta ~/pi-apps
+rm -f /usr/local/bin/plasma-pi-apps-patch /usr/local/bin/pi-apps-go 2>/dev/null
+[ -L /home/plasma/pi-apps/settings ] && [ ! -e /home/plasma/pi-apps/settings ] && rm -f /home/plasma/pi-apps/settings
+
+# GUI e repositório na mesma instalação: sem o repositório a loja sai vazia, então falha alto em vez de instalar em silêncio
+REPO_OK=1; ensure_pi_apps_repo || REPO_OK=0
+
+# launcher: X11 nativo do PlasmaDroid (Wayland como reserva), roda como o usuário plasma (o Pi-Apps recusa root)
+cat > /usr/local/bin/pi-apps <<'LAUNCHER'
+#!/bin/bash
+# launcher do Pi-Apps (Bash) no PlasmaDroid. Roda como "plasma": o Pi-Apps recusa root.
+U=plasma
+. /usr/local/lib/plasma/env.sh
+if locale -a 2>/dev/null | grep -qi '^en_US\.utf-\?8§'; then export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8; else export LANG=C.UTF-8 LC_ALL=C.UTF-8; fi
+export NO_AT_BRIDGE=1 GTK_A11Y=none
+if [ "§(id -u)" = 0 ]; then exec /usr/local/bin/plasma-as "§U" /usr/local/bin/pi-apps "§@"; fi
+# GTK3 no Wayland nunca informa "monitor primário": o Pi-Apps acha que a tela é 0x0 ("Small screen detected
+# (0x0)"), abre a janela compacta minúscula e a imagem sai cortada/esticada. No servidor X11 nativo do PlasmaDroid
+# (RANDR com saída primária e tela = display real, acompanha rotação) o tamanho vem certo.
+# PIAPPS_BACKEND=wayland volta ao modo antigo.
+D=
+if [ "§{PIAPPS_BACKEND:-x11}" = x11 ] && [ -x /usr/local/bin/plasma-x11 ]; then
+  D=§(/usr/local/bin/plasma-x11 run 2>/dev/null | tail -1)
+fi
+case "§D" in
+  :[0-9]*) export DISPLAY="§D" GDK_BACKEND=x11 XDG_SESSION_TYPE=x11 ;;
+  *) export GDK_BACKEND=wayland ;;
+esac
+cd /home/plasma/pi-apps || { echo "Pi-Apps não está em /home/plasma/pi-apps. Rode: plasma install pi-apps" >&2; exit 1; }
+exec ./gui "§@"
+LAUNCHER
+chmod 755 /usr/local/bin/pi-apps
+
+mkdir -p /usr/share/applications
+cat > /usr/share/applications/pi-apps.desktop <<'DESK'
+[Desktop Entry]
+Name=Pi-Apps
+Comment=Loja de scripts de instalação (Pi-Apps)
+Exec=/usr/local/bin/pi-apps
+Icon=/usr/share/pixmaps/pi-apps.png
+Terminal=false
+Type=Application
+Categories=System;PackageManager;
+StartupNotify=true
+DESK
+
+if [ "§REPO_OK" = 1 ]; then say "Pi-Apps instalado com o catálogo. Rode: pi-apps"
+else say "AVISO: Pi-Apps instalado, mas SEM o catálogo (sem rede). Com internet, rode de novo: plasma install pi-apps"; fi
 """.replace('§', '$'), true),
         Entry("usr/local/bin/plasma-gl", """#!/bin/bash
 # plasma-gl — OpenGL dos apps Qt/KDE do guest.
@@ -951,6 +1951,7 @@ esac
         Entry("usr/local/lib/plasma/env.sh", """# carregado por `plasma run` e pelos launchers de apps (. env.sh)
 export XDG_RUNTIME_DIR="§{XDG_RUNTIME_DIR:-/run/plasma-wayland}"
 export WAYLAND_DISPLAY="§{WAYLAND_DISPLAY:-wayland-0}"
+case ":§{XDG_DATA_DIRS:-}:" in *:/usr/local/share:*) ;; *) export XDG_DATA_DIRS="/usr/local/share:§{XDG_DATA_DIRS:-/usr/share}" ;; esac
 export QT_QPA_PLATFORM="§{QT_QPA_PLATFORM:-wayland}"
 export QSG_RHI_BACKEND="§{QSG_RHI_BACKEND:-vulkan}"   # apps que forçam OpenGL (Kdenlive) ignoram; o launcher deles ajusta
 if command -v plasma-dbus >/dev/null 2>&1; then

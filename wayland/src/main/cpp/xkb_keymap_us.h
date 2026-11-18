@@ -1,3 +1,4 @@
+
 #pragma once
 static const char XKB_KEYMAP_US[] = R"PIPERELLA_XKB(
 xkb_keymap {

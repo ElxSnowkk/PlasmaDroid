@@ -1,4 +1,3 @@
-// Parte do projeto PlasmaDroid.
 
 package org.plasma.app.ui
 
@@ -205,7 +204,7 @@ private fun PageTitle(title: String, subtitle: String) {
 private fun FeatureCard(icon: String, title: String, text: String) {
     val b = LocalBreeze.current
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(9.dp)).background(b.view.copy(alpha = .68f))
+        Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(9.dp)).background(b.view.mul(.68f))
             .border(1.dp, b.line, RoundedCornerShape(9.dp)).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -300,6 +299,7 @@ private fun EnvironmentPage(session: DesktopSession, onRetry: () -> Unit) {
     val total = ui.steps.size.coerceAtLeast(1)
     val done = ui.steps.count { it.state == StepState.DONE }
     val frac by animateFloatAsState(done.toFloat() / total, tween(300), label = "env-progress")
+    val emSegundoPlano = ui.steps.any { it.background && it.state != StepState.DONE && it.state != StepState.FAILED }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
         Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(b.line)) {
             Box(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(b.accent))
@@ -307,7 +307,10 @@ private fun EnvironmentPage(session: DesktopSession, onRetry: () -> Unit) {
         T("$done/$total", 12.sp, b.dim, modifier = Modifier.padding(start = 10.dp))
     }
 
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(b.view.copy(alpha = .68f)).border(1.dp, b.line, RoundedCornerShape(9.dp)).padding(12.dp)) {
+    if (emSegundoPlano) {
+        T("Pacotes complementares, Pi-Apps e FEX continuam em segundo plano. Você já pode usar o desktop normalmente.", 12.sp, BgAmarelo, modifier = Modifier.padding(bottom = 8.dp))
+    }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(b.view.mul(.68f)).border(1.dp, b.line, RoundedCornerShape(9.dp)).padding(12.dp)) {
         ui.steps.forEach { StepRow(it) }
     }
     if (ui.error != null) {
@@ -339,7 +342,7 @@ private fun EnvironmentPage(session: DesktopSession, onRetry: () -> Unit) {
         SectionTitle("Wayland")
         val wl by app.wayland.state.collectAsState()
         val wlWindows by app.wayland.windows.collectAsState()
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).background(b.view.copy(alpha = .68f)).border(1.dp, b.line, RoundedCornerShape(7.dp)).padding(11.dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).background(b.view.mul(.68f)).border(1.dp, b.line, RoundedCornerShape(7.dp)).padding(11.dp)) {
             StepRow(
                 SetupStep(
                     id = "wayland", label = "Servidor Wayland",
@@ -376,7 +379,7 @@ private fun LookPage(session: DesktopSession) {
             row.forEach { t ->
                 val on = t.id == current
                 Column(
-                    Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(b.view.copy(alpha = .68f))
+                    Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(b.view.mul(.68f))
                         .border(if (on) 2.dp else 1.dp, if (on) b.accent else b.line, RoundedCornerShape(10.dp))
                         .breezeClickable(10.dp) { st.put(Keys.THEME, t.id); st.put(Keys.ACCENT, U.THEME_ACCENT); st.put(Keys.WALLPAPER, "theme") }
                         .padding(10.dp),
@@ -431,14 +434,18 @@ private fun DonePage(session: DesktopSession) {
     FeatureCard("palette", "Tema", Themes.byId(st.string(Keys.THEME, "breeze-dark")).label)
 }
 
+private val BgAmarelo = Color(0xFFF5C211)
+
 @Composable
 private fun StepRow(s: SetupStep) {
     val b = LocalBreeze.current
-    val (mark, col) = when (s.state) {
-        StepState.DONE -> "✔" to Color(0xFF27AE60)
-        StepState.RUNNING -> "●" to b.accent
-        StepState.FAILED -> "✘" to Color(0xFFDA4453)
-        StepState.PENDING -> "○" to b.dim
+    val pendenteBg = s.background && s.state != StepState.DONE && s.state != StepState.FAILED
+    val (mark, col) = when {
+        pendenteBg -> "●" to BgAmarelo
+        s.state == StepState.DONE -> "✔" to Color(0xFF27AE60)
+        s.state == StepState.RUNNING -> "●" to b.accent
+        s.state == StepState.FAILED -> "✘" to Color(0xFFDA4453)
+        else -> "○" to b.dim
     }
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.Top) {
         T(mark, 14.sp, col, modifier = Modifier.width(22.dp))

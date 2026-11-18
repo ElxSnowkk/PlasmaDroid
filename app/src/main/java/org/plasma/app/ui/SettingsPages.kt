@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -169,24 +153,21 @@ internal fun AndroidPage(session: DesktopSession) {
     SectionTitle("Shizuku (opcional)")
     T(shz.label, 13.sp, if (shz == ShizukuState.CONNECTED) Color(0xFF27AE60) else b.text, FontWeight.Medium)
     T("Com Shizuku conectado: janelas de qualquer app em display confiável + mouse/teclado/toque dentro das janelas.", 11.sp, b.dim)
-    Row(Modifier.padding(top = 6.dp)) {
+    ButtonRow(Modifier.padding(top = 6.dp)) {
         BreezeButton("Solicitar permissão", { app.shizuku.requestPermission() }, enabled = shz == ShizukuState.NO_PERMISSION, primary = true)
-        Spacer(Modifier.width(6.dp))
         BreezeButton("Reavaliar", { app.shizuku.refresh() })
-        Spacer(Modifier.width(6.dp))
         BreezeButton("Abrir Shizuku", { ctx.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } ?: session.showToast("Shizuku não instalado") })
     }
     SectionTitle("Root (opcional)")
     T(when (root) { true -> "Root disponível"; false -> "Sem root"; null -> "Não testado" }, 13.sp)
-    Row(Modifier.padding(top = 6.dp)) {
+    ButtonRow(Modifier.padding(top = 6.dp)) {
         BreezeButton("Detectar root", { scope.launch { app.root.detect() } })
-        Spacer(Modifier.width(8.dp))
     }
     SwitchRow("Usar root como backend quando não houver Shizuku", st.bool(Keys.ROOT_ON, false), "Sem display confiável; entrada via comando `input` (mais lenta).") { st.put(Keys.ROOT_ON, it) }
     SectionTitle("Janelas Android")
     Choice("Método preferido", listOf("auto" to "Automático", "shizuku" to "Shizuku (B)", "app" to "Display do app (A)", "conventional" to "Convencional (E)"),
         st.string(Keys.METHOD, "auto")) { st.put(Keys.METHOD, it) }
-    SliderRow("Densidade das janelas", st.int(Keys.ANDROID_DPI, 240).toFloat(), 120f..420f, "${st.int(Keys.ANDROID_DPI, 240)} dpi") { st.put(Keys.ANDROID_DPI, it.roundToInt()) }
+    SliderRow("Densidade das janelas", UiScale.androidDpi(ctx, st).toFloat(), 120f..420f, "${UiScale.androidDpi(ctx, st)} dpi") { st.put(Keys.ANDROID_DPI, it.roundToInt()) }
     SwitchRow("Forçar atividades redimensionáveis", st.bool(Keys.FORCE_RESIZABLE, false),
         "Altera a configuração global force_resizable_activities (exige Shizuku/root). Reversível aqui.") { on ->
         scope.launch {

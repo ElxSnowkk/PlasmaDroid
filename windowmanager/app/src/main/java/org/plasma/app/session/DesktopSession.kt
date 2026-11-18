@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.session
 
@@ -252,13 +236,28 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
         wm.setWorkArea(if (panelTop) Frame(0f, panelPx, w, h - panelPx) else Frame(0f, 0f, w, h - panelPx))
     }
 
-    fun shutdown() { wm.state.value.windows.map { it.id }.forEach { finalizeClose(it) } }
+    fun shutdown() {
+        wm.state.value.windows.map { it.id }.forEach { id ->
+            val c = contents[id]
+            if (c is WindowContent.WaylandClientWindow && keepAlive(c.waylandId)) return@forEach
+            finalizeClose(id)
+        }
+    }
+
+    private fun keepAlive(waylandId: Long): Boolean = runCatching {
+        app.wayland.windows.value.any { it.id == waylandId && it.appId == "pi-apps" }
+    }.getOrDefault(false)
     fun showToast(t: String) { toast = t }
 }
 
 class SessionRegistry(private val app: PlasmaApp) {
     private val map = HashMap<Int, DesktopSession>()
     @Synchronized fun obtain(displayId: Int): DesktopSession = map.getOrPut(displayId) { DesktopSession(displayId, app) }
-    @Synchronized fun release(displayId: Int) { map.remove(displayId)?.shutdown() }
+    @Synchronized fun release(displayId: Int) {
+        map.remove(displayId)?.shutdown()
+        if (map.isEmpty()) runCatching {
+            if (app.wayland.windows.value.isEmpty()) app.wayland.stop()
+        }
+    }
     @Synchronized fun all(): List<DesktopSession> = map.values.toList()
 }

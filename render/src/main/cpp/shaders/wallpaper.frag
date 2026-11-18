@@ -1,3 +1,4 @@
+#version 450
 /*
  * This file belongs to the PlasmaDroid project.
  *
@@ -15,7 +16,6 @@
  * PARTICULAR PURPOSE. See the GNU General Public License for more details.
  */
 
-#version 450
 layout(location = 0) in vec2 vUv;
 layout(location = 0) out vec4 outColor;
 layout(push_constant) uniform WallpaperPush {

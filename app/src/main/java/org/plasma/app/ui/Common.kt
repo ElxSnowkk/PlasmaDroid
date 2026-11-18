@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -128,15 +112,16 @@ fun ToolIcon(kind: String, size: Dp) {
                 drawRoundRect(Color(0x55FFFFFF), Offset(w * .10f, w * .29f), Size(w * .80f, w * .035f), CornerRadius(w * .02f))
             }
             "settings" -> {
+
                 val c = Offset(w / 2, w / 2)
                 for (i in 0 until 8) {
                     val a = i * Math.PI / 4
-                    drawLine(Color(0xFF8E9AA0), Offset(c.x + (w * .30f * cos(a)).toFloat(), c.y + (w * .30f * sin(a)).toFloat()),
-                        Offset(c.x + (w * .45f * cos(a)).toFloat(), c.y + (w * .45f * sin(a)).toFloat()), strokeWidth = w * .15f, cap = StrokeCap.Round)
+                    drawLine(Color(0xFF8E9AA0), Offset(c.x + (w * .22f * cos(a)).toFloat(), c.y + (w * .22f * sin(a)).toFloat()),
+                        Offset(c.x + (w * .34f * cos(a)).toFloat(), c.y + (w * .34f * sin(a)).toFloat()), strokeWidth = w * .12f, cap = StrokeCap.Round)
                 }
-                drawCircle(Brush.verticalGradient(listOf(Color(0xFFB6C0C5), Color(0xFF7F8C8D))), w * .33f, c)
-                drawCircle(Color(0xFF31363B), w * .13f, c)
-                drawCircle(Color(0xFF3DAEE9), w * .07f, c)
+                drawCircle(Brush.verticalGradient(listOf(Color(0xFFB6C0C5), Color(0xFF7F8C8D))), w * .27f, c)
+                drawCircle(Color(0xFF31363B), w * .105f, c)
+                drawCircle(Color(0xFF3DAEE9), w * .055f, c)
             }
             "terminal" -> {
                 drawRoundRect(Brush.verticalGradient(listOf(Color(0xFF4D565E), Color(0xFF232629))), Offset(w * .05f, w * .12f), Size(w * .90f, w * .76f), CornerRadius(w * .10f))
@@ -161,7 +146,18 @@ fun ToolIcon(kind: String, size: Dp) {
 @Composable
 fun EntryIcon(id: String, size: Dp) {
     if (id.startsWith("tool:")) ToolIcon(id.removePrefix("tool:"), size)
-    else {
+    else if (id.startsWith("wayland:") || id.startsWith("x11:")) {
+        val bmp = LocalSession.current.guestIcons[id]
+        if (bmp != null) Image(bmp, null, Modifier.size(size)) else Spacer(Modifier.size(size))
+    } else if (id.startsWith("linux:")) {
+        val catalog = LocalSession.current.app.linuxApps
+        val list by catalog.apps.collectAsState()
+        val bmp by produceState<ImageBitmap?>(null, id, list) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { catalog.icon(id.removePrefix("linux:")) }
+        }
+        val b = bmp
+        if (b != null) Image(b, null, Modifier.size(size)) else Spacer(Modifier.size(size))
+    } else {
         val apps by LocalSession.current.app.apps.collectAsState()
         val a = apps.firstOrNull { it.pkg == id.removePrefix("app:") }
         if (a != null) AppIcon(a, size) else Spacer(Modifier.size(size))
@@ -173,11 +169,14 @@ fun entryLabel(id: String, apps: List<AndroidApp>): String = when (id) {
     "tool:settings" -> "Configurações do Sistema"
     "tool:terminal" -> "Konsole"
     "tool:capture" -> "Captura de tela"
-    else -> apps.firstOrNull { it.pkg == id.removePrefix("app:") }?.label ?: id.removePrefix("app:")
+    else -> if (id.startsWith("linux:")) org.plasma.app.session.LinuxAppIndex.byId[id]?.name ?: id.removePrefix("linux:")
+    else apps.firstOrNull { it.pkg == id.removePrefix("app:") }?.label ?: id.removePrefix("app:")
 }
 
 fun openById(session: DesktopSession, id: String) {
     if (id.startsWith("tool:")) session.openTool(id.removePrefix("tool:"))
+    else if (id.startsWith("linux:")) org.plasma.app.session.LinuxAppIndex.byId[id]?.let { session.openLinux(it) }
+        ?: session.showToast("Aplicativo não encontrado")
     else session.app.apps.value.firstOrNull { it.pkg == id.removePrefix("app:") }?.let { session.openAndroid(it) }
         ?: session.showToast("Aplicativo não encontrado")
 }
@@ -219,7 +218,7 @@ fun BreezeButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifie
             .hoverable(src).clickable(interactionSource = src, indication = null, enabled = enabled) { onClick() }
             .padding(horizontal = 14.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
-    ) { T(text, 13.sp, if (primary) b.onAccent else b.text) }
+    ) { Text(text, color = if (primary) b.onAccent else b.text, fontSize = 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
 }
 
 @Composable

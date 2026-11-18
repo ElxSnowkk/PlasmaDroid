@@ -1,5 +1,3 @@
-// Parte do PlasmaDroid — módulo PlasmaVK.
-// Créditos: baseado no projeto Proot.
 
 package org.plasma.proot
 
@@ -53,9 +51,17 @@ object ProotLauncher {
         cmd += p.proot.path
         if (verbose) cmd += listOf("-v", "1")
 
-        cmd += listOf("--kill-on-exit", "-0", "-r", rootfs.path, "-b", "/dev", "-b", "/proc", "-b", "/sys")
+        cmd += listOf("--kill-on-exit", "-0")
+        if (p.link2symlinkFlag.exists()) cmd += "--link2symlink"
+        if (p.fexTransparentFlag.exists() && File(rootfs, "usr/local/lib/plasma/fex/.ready").exists() &&
+            File(rootfs, "usr/local/bin/fex-run").exists()) cmd += listOf("-q", "/usr/local/bin/fex-run")
+        cmd += listOf("-r", rootfs.path, "-b", "/dev", "-b", "/proc", "-b", "/sys")
 
         if (File("/sdcard").exists()) cmd += listOf("-b", "/sdcard:/sdcard")
+
+        File(rootfs, "usr/local/lib/plasma/native").mkdirs()
+        cmd += listOf("-b", "${p.nativeLibDir.path}:/usr/local/lib/plasma/native")
+        if (p.fexHost.exists()) cmd += listOf("-b", "${p.fexHost.path}:/usr/local/lib/plasma/fex-host")
 
         val androidSystemPaths = listOf("/system", "/vendor", "/apex", "/odm", "/product", "/system_ext")
         val allBinds = ArrayList(binds)

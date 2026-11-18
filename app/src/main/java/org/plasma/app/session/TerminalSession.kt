@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.session
 
@@ -87,6 +71,7 @@ class TerminalSession(private val app: PlasmaApp, private val session: DesktopSe
         val sh = DebianShell(deb.paths, onLine = { print(it) }, onDone = { dir, code ->
             cwd = dir; cwdPath = shortCwd()
             if (code != 0 && code != 130) print("$ESC[2m[código de saída $code]$ESC[0m")
+            runCatching { app.linuxApps.requestRefresh() }
             partialRaw = ""; busy = false
         }, onPartial = { if (it != partialRaw) { partialRaw = it; scheduleFlush() } },
         onExit = { partialRaw = ""; print("$ESC[2m[shell encerrado — pressione Enter para reiniciar]$ESC[0m"); shell = null; busy = false })
@@ -95,15 +80,17 @@ class TerminalSession(private val app: PlasmaApp, private val session: DesktopSe
             runCatching { app.wayland.ensureStarted(deb.paths) }
             val x11 = app.settings.string(Keys.GFX_SERVER, "wayland") == "x11"
             x11Mode = x11
-            val env = runCatching { app.wayland.clientEnvironment(x11) }.getOrDefault(emptyMap())
+            val display = runCatching {
+                val tmp = java.io.File(deb.paths.rootfs, "tmp")
+                app.x11.watch(tmp)
+                app.x11.ensure(tmp)
+            }.getOrDefault(-1)
+            val env = runCatching { app.wayland.clientEnvironment(x11, display.takeIf { it >= 0 }) }.getOrDefault(emptyMap())
             val binds = runCatching { app.wayland.clientBinds(deb.paths) }.getOrDefault(emptyList())
+            deb.refreshDns()
             sh.start(cwd, extraEnv = env, binds = binds); shell = sh
         }
         catch (t: Throwable) { PlasmaLog.w("term", "falha ao iniciar o shell Debian", t); print("Falha ao iniciar o Debian: ${t.message}"); return }
-        if (x11Mode) {
-
-            sh.run("plasma-x11 --background")
-        }
         if (pendingFetch) { pendingFetch = false; busy = true; sh.run("command -v fastfetch >/dev/null && fastfetch") }
     }
 
@@ -147,6 +134,16 @@ class TerminalSession(private val app: PlasmaApp, private val session: DesktopSe
         val sh = shell ?: run { scope.launch { startShell(); shell?.let { s -> busy = true; s.run(cmd) } }; return }
         busy = true
         sh.run(cmd)
+    }
+
+    fun runCommand(cmd: String) {
+        print(promptAnsi() + cmd)
+        if (history.lastOrNull() != cmd) history += cmd
+        histIdx = history.size
+        scope.launch {
+            if (shell == null) startShell()
+            shell?.let { s -> busy = true; s.run(cmd) }
+        }
     }
 
     fun historyPrev() { if (history.isNotEmpty()) { histIdx = (histIdx - 1).coerceAtLeast(0); input = history[histIdx] } }

@@ -1,4 +1,3 @@
-// Parte do projeto PlasmaDroid.
 
 package org.plasma.app.ui
 

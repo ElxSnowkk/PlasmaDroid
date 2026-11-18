@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -50,6 +34,7 @@ private val ICONS: Map<String, Ic> = mapOf(
     "android" to Ic("M3.5 9.5 A4.5 4.5 0 0 1 12.5 9.5 Z M5 3 L6.2 5 M11 3 L9.8 5 M5.5 11.5 V14 M10.5 11.5 V14 M6.3 7.6 h.01 M9.7 7.6 h.01"),
     "share" to Ic("M2.5 5.5 H13 M10 2.8 L13 5.5 L10 8.2 M13.5 10.5 H3 M6 7.8 L3 10.5 L6 13.2"),
     "keyboard" to Ic("M1.5 4.5 H14.5 V11.5 H1.5 Z M4 7 h.01 M6.7 7 h.01 M9.3 7 h.01 M12 7 h.01 M5 9.5 H11"),
+    "eye" to Ic("M1.5 8 C3 5 5.5 3.5 8 3.5 C10.5 3.5 13 5 14.5 8 C13 11 10.5 12.5 8 12.5 C5.5 12.5 3 11 1.5 8 Z M8 9.8 A1.8 1.8 0 1 0 8 6.2 A1.8 1.8 0 0 0 8 9.8 Z"),
     "list" to Ic("M2.5 4 H13.5 M2.5 8 H13.5 M2.5 12 H13.5"),
     "info" to Ic("M8 14 A6 6 0 1 0 8 2 A6 6 0 0 0 8 14 Z M8 7.2 V11 M8 5 h.01"),
     "search" to Ic("M7 11.5 A4.5 4.5 0 1 0 7 2.5 A4.5 4.5 0 0 0 7 11.5 Z M10.4 10.4 L14 14"),
@@ -57,6 +42,7 @@ private val ICONS: Map<String, Ic> = mapOf(
     "plus" to Ic("M8 3 V13 M3 8 H13"),
     "check" to Ic("M3 8.5 L6.5 12 L13 4.5"),
     "chevL" to Ic("M10 3 L5 8 L10 13"),
+    "chevU" to Ic("M3 10.5 L8 5.5 L13 10.5"),
     "chevR" to Ic("M6 3 L11 8 L6 13"),
     "arrowL" to Ic("M13 8 H3 M7.5 3.5 L3 8 L7.5 12.5"),
     "arrowUp" to Ic("M8 13 V3 M3.5 7.5 L8 3 L12.5 7.5"),

@@ -1,3 +1,4 @@
+#version 450
 /*
  * This file belongs to the PlasmaDroid project.
  *
@@ -15,7 +16,6 @@
  * PARTICULAR PURPOSE. See the GNU General Public License for more details.
  */
 
-#version 450
 layout(location = 0) out vec2 vUv;
 void main() {
     vec2 p = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));

@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.core
 
@@ -33,11 +17,13 @@ object Keys {
     const val PANEL_TOP = "ui.panelTop"
     const val PANEL_H = "ui.panelHeightDp"
     const val UI_SCALE = "ui.scale"
+    const val UI_SCALE_AUTO = "ui.scale.auto"
     const val DESKTOPS = "wm.desktops"
     const val WALLPAPER = "ui.wallpaper"
     const val PINNED = "ui.pinned"
     const val FAVS = "ui.favs"
     const val DESK_ICONS = "ui.deskIcons"
+    const val PIAPPS_DESK = "ui.piappsDesk"
     const val WIDGETS = "ui.widgets"
     const val NOTES = "ui.notes"
     const val USER_NAME = "ui.userName"
@@ -63,6 +49,8 @@ object Keys {
     const val FX_BLUR_STRENGTH = "fx.blurStrength"
     const val FX_TRANSPARENCY = "fx.transparency"
     const val FX_SHADOWS = "fx.shadows"
+
+    const val FX_GLASS = "fx.glass"
     const val FX_ANIM_SPEED = "fx.animSpeed"
     const val FX_WALL_ANIM = "fx.wallpaperAnimated"
     const val FX_FPS = "fx.fpsCap"
@@ -76,6 +64,8 @@ object Keys {
     const val PANEL_RADIUS = "ui.panelRadiusDp"
 
     const val PANEL_WIDTH_PCT = "ui.panelWidthPct"
+
+    const val PANEL_TRAY_MODE = "ui.panelTrayMode"
     const val SCALE_MODE = "ui.scaleConfirmed"
     const val TERM_FONT = "term.fontSp"
     const val TERM_OPACITY = "term.opacity"
@@ -83,6 +73,7 @@ object Keys {
     const val TERM_SCHEME = "term.scheme"
 
     const val GFX_SERVER = "linux.gfxServer"
+    const val WAYLAND_SYNC_SIZE = "wayland.syncSize"
     const val VK_DRIVER = "vk.driver"
 
     const val GL_ANGLE = "gl.angle"

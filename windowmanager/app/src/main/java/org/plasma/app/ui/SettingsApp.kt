@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -307,11 +291,17 @@ private fun TerminalPage(session: DesktopSession) {
     SwitchRow("Executar fastfetch ao abrir", st.bool(Keys.TERM_FASTFETCH, true), "Mostra o logotipo do Android e dados reais do aparelho (CPU, GPU, OpenGL, memória…).") { st.put(Keys.TERM_FASTFETCH, it) }
     SectionTitle("Apps gráficos Linux")
     SwitchRow(
-        "Usar X11 (Xwayland) em vez de Wayland nativo",
+        "Usar X11 (servidor próprio do PlasmaDroid) em vez de Wayland nativo",
         st.string(Keys.GFX_SERVER, "wayland") == "x11",
-        "Desligado: Wayland nativo (mais rápido, recomendado). Ligado: o Konsole exporta DISPLAY=:0 e inicia o Xwayland (rootful) numa janela, " +
-            "para apps que só falam X11. Requer `apt-get install xwayland openbox` no Debian e reabrir o Konsole. Também dá para iniciar manualmente com `plasma-x11`."
+        "Desligado: Wayland nativo (mais rápido, recomendado). Ligado: o PlasmaDroid roda um servidor X11 nativo; cada janela X11 vira uma janela do desktop, como as Wayland. " +
+            "O Konsole exporta DISPLAY=:0. Também dá para iniciar manualmente com `plasma-x11 start`."
     ) { st.put(Keys.GFX_SERVER, if (it) "x11" else "wayland") }
+    SectionTitle("Saída Wayland")
+    SwitchRow(
+        "Sincronizar resolução com a janela",
+        st.bool(Keys.WAYLAND_SYNC_SIZE, false),
+        "Ligado: a resolução de saída do Wayland acompanha o tamanho do desktop sempre que ele muda (arrastar, girar a tela). Desligado: resolução fixa em 1280×720."
+    ) { st.put(Keys.WAYLAND_SYNC_SIZE, it) }
     BreezeButton("Abrir o Konsole", { session.openTool("terminal") }, Modifier.padding(top = 8.dp), primary = true)
 }
 

@@ -1,3 +1,4 @@
+
 #include "vulkan_wayland_renderer.h"
 #ifndef VK_USE_PLATFORM_ANDROID_KHR
 #define VK_USE_PLATFORM_ANDROID_KHR
@@ -981,6 +982,7 @@ struct VulkanWaylandOutput::Impl {
         r.contentGeneration = s->content_generation;
         r.bufferGeneration = s->buffer_generation;
         r.yInvert = (s->dmabuf.flags & 1u) != 0;
+        r.opaqueShm = true;
         if (!createViewAndDescriptor(r)) return false;
         r.ahb = ahb;
         return true;
@@ -1072,6 +1074,7 @@ struct VulkanWaylandOutput::Impl {
         r.contentGeneration = s->content_generation;
         r.bufferGeneration = s->buffer_generation;
         r.yInvert = (s->dmabuf.flags & 1u) != 0;
+        r.opaqueShm = true;
         return createViewAndDescriptor(r);
 #else
         (void)r; (void)s;

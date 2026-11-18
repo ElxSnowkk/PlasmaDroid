@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.session
 
@@ -34,6 +18,7 @@ import org.plasma.app.android.WindowLauncher
 import org.plasma.bridge.AndroidApp
 import org.plasma.bridge.PrivilegedBackend
 import org.plasma.core.Keys
+import org.plasma.core.PlasmaLog
 import org.plasma.wm.Frame
 import org.plasma.wm.Orientation
 import org.plasma.wm.WinState
@@ -59,6 +44,7 @@ sealed interface WindowContent {
     data object Setup : WindowContent
     data object WaylandDisplay : WindowContent
     data class WaylandClientWindow(val waylandId: Long) : WindowContent
+    data class X11ClientWindow(val xid: Long) : WindowContent
     data object Settings : WindowContent
     class Terminal(first: TerminalSession) : WindowContent {
         val tabs = androidx.compose.runtime.mutableStateListOf(first)
@@ -71,10 +57,14 @@ sealed interface WindowContent {
     }
 }
 
-enum class TrayPopup { NONE, CALENDAR, NOTIFICATIONS, SYSTEM, NETWORK, BLUETOOTH, VOLUME, BRIGHTNESS }
+enum class TrayPopup { NONE, CALENDAR, NOTIFICATIONS, SYSTEM, NETWORK, BLUETOOTH, VOLUME, BRIGHTNESS, OVERFLOW }
 
 class MenuItem(val label: String, val enabled: Boolean = true, val separator: Boolean = false, val icon: String? = null, val action: () -> Unit = {})
 class MenuState(val x: Float, val y: Float, val items: List<MenuItem>)
+data class AppImagePrompt(
+    val file: java.io.File, val title: String = "", val comment: String = "", val arch: String = "", val hostArch: String = "",
+    val archOk: Boolean = true, val icon: androidx.compose.ui.graphics.ImageBitmap? = null, val loading: Boolean = true,
+)
 
 class DesktopSession(val displayId: Int, val app: PlasmaApp) {
 
@@ -83,10 +73,19 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
     var startMenuOpen by mutableStateOf(false)
     var tray by mutableStateOf(TrayPopup.NONE)
     var locked by mutableStateOf(false)
+
+    var appPicker by mutableStateOf(false)
     var menu by mutableStateOf<MenuState?>(null)
     var toast by mutableStateOf<String?>(null)
+    var piAppsNotice by mutableStateOf(false)
+    var appImagePrompt by mutableStateOf<AppImagePrompt?>(null)
+
+    val guestIcons = mutableStateMapOf<String, androidx.compose.ui.graphics.ImageBitmap>()
+    private val guestAppIdIcons = mutableMapOf<String, androidx.compose.ui.graphics.ImageBitmap>()
     var widgetPicker by mutableStateOf(false)
     var settingsPage by mutableStateOf("appearance")
+
+    var settingsDeep by mutableStateOf(false)
     val launcher = WindowLauncher(app, this)
     val compositor = GlCompositor(app.render)
     val glass = GlassRegistry()
@@ -127,6 +126,10 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
                                 Frame(wa.x + 24f + offset, wa.y + 24f + offset, width, height),
                             )
                             waylandManagedWindows[client.id] = managedId
+                            val iconKey = "wayland:${client.id}"
+                            val byAppId = client.appId.lowercase().takeIf { it.isNotBlank() }
+                            (byAppId?.let { guestAppIdIcons[it] } ?: AppImageSupport.pending()?.also { ic -> byAppId?.let { guestAppIdIcons[it] = ic } })
+                                ?.let { guestIcons[iconKey] = it }
                             contents[managedId] = WindowContent.WaylandClientWindow(client.id)
                         }
                     }
@@ -151,7 +154,7 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
     var requestStorage: () -> Unit = {}
     var openNotificationSettings: () -> Unit = {}
 
-    fun closePopups() { startMenuOpen = false; tray = TrayPopup.NONE; menu = null; widgetPicker = false }
+    fun closePopups() { startMenuOpen = false; tray = TrayPopup.NONE; menu = null; widgetPicker = false; appPicker = false }
 
     fun openAndroid(a: AndroidApp) {
         closePopups()
@@ -159,10 +162,65 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
         contents[id] = WindowContent.AndroidWin(a)
     }
 
+    fun promptAppImage(f: java.io.File) {
+        closePopups()
+        val fallback = AppImageSupport.fallbackIcon(app)
+        appImagePrompt = AppImagePrompt(f, title = f.nameWithoutExtension, icon = fallback, loading = true)
+        app.appScope.launch(Dispatchers.IO) {
+            val info = runCatching { AppImageSupport.inspect(app, f) }.getOrNull()
+            withContext(Dispatchers.Main) {
+                val cur = appImagePrompt ?: return@withContext
+                if (cur.file != f) return@withContext
+                appImagePrompt = if (info == null) cur.copy(loading = false)
+                else cur.copy(
+                    title = info.name.ifBlank { cur.title }, comment = info.comment, arch = info.arch, hostArch = info.hostArch,
+                    archOk = info.arch.isBlank() || info.arch == "desconhecida" || info.arch == info.hostArch,
+                    icon = info.icon ?: fallback, loading = false,
+                )
+            }
+        }
+    }
+
+    fun runAppImage(p: AppImagePrompt) {
+        appImagePrompt = null
+        AppImageSupport.markLaunch(p.icon ?: AppImageSupport.fallbackIcon(app))
+        runInTerminal("/usr/local/bin/plasma-appimage run " + AppImageSupport.shq(AppImageSupport.guestPath(p.file)))
+    }
+
+    fun openLinux(a: LinuxApp) {
+        closePopups()
+        if (!app.debian.installed) { showToast("O Debian ainda não está instalado"); return }
+        if (a.terminal) { runInTerminal(app.linuxApps.commandLine(a)); return }
+        if (a.id == "pi-apps") {
+            val marca = java.io.File(app.debian.paths.root, "pi-apps-aberto")
+            if (!marca.exists()) {
+                runCatching { marca.writeText("1\n") }
+                piAppsNotice = true
+            }
+        }
+        app.appScope.launch(Dispatchers.IO) {
+            AppImageSupport.markLaunch(app.linuxApps.icon(a.id))
+            runCatching { app.linuxApps.launch(a) }.onFailure {
+                PlasmaLog.w("linux-app", "falha ao abrir ${a.id}", it)
+                withContext(Dispatchers.Main) { showToast("Não foi possível abrir ${a.name}: ${it.message ?: it.javaClass.simpleName}") }
+            }
+        }
+    }
+
+    fun runInTerminal(cmd: String) {
+        closePopups()
+        val wa = wm.state.value.workArea
+        val n = wm.state.value.windows.size % 6 * 30f
+        val ts = TerminalSession(app, this)
+        val id = wm.open("Konsole", "tool:terminal", "terminal", Frame(wa.x + 90f + n, wa.y + 60f + n, wa.w * 0.58f, wa.h * 0.62f))
+        contents[id] = WindowContent.Terminal(ts)
+        ts.runCommand(cmd)
+    }
+
     fun openTool(tool: String, page: String? = null) {
         if (tool == "wayland") return
         closePopups()
-        if (page != null) settingsPage = page
+        if (page != null) { settingsPage = page; settingsDeep = true }
         if (tool == "wayland") {
 
             contents.entries.firstOrNull { it.value === WindowContent.WaylandDisplay }?.let { wm.focus(it.key); return }
@@ -179,7 +237,12 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
             else -> "Captura de tela" to (WindowContent.Capture() as WindowContent)
         }
         val n = wm.state.value.windows.size % 6 * 30f
-        val size = when (tool) {
+
+        val dens = app.resources.displayMetrics.density * org.plasma.app.ui.UiScale.effective(app, app.settings)
+        val narrow = wa.w / dens < 640f
+        val full = Frame(wa.x + 6f, wa.y + 6f, wa.w - 12f, wa.h - 12f)
+        val size = if (narrow && tool != "capture") full else when (tool) {
+            "files" -> Frame(wa.x + 40f + n, wa.y + 40f + n, wa.w * 0.62f, wa.h * 0.72f)
             "settings" -> Frame(wa.x + 60f, wa.y + 40f, wa.w * 0.8f, wa.h * 0.85f)
             "setup" -> Frame(wa.x + wa.w * 0.12f, wa.y + wa.h * 0.06f, wa.w * 0.76f, wa.h * 0.88f)
             "terminal" -> Frame(wa.x + 90f + n, wa.y + 60f + n, wa.w * 0.58f, wa.h * 0.62f)
@@ -196,7 +259,7 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
     }
 
     fun isAppSurface(id: Int): Boolean = when (contents[id]) {
-        is WindowContent.AndroidWin, is WindowContent.WaylandClientWindow -> true
+        is WindowContent.AndroidWin, is WindowContent.WaylandClientWindow, is WindowContent.X11ClientWindow -> true
         else -> false
     }
 
@@ -234,6 +297,32 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
         c.active = c.active.coerceAtMost(c.tabs.size - 1)
     }
 
+    private val x11ManagedWindows = mutableMapOf<Long, Int>()
+
+    fun syncX11Windows(list: List<org.plasma.x11.X11Window>) {
+        val live = list.mapTo(HashSet()) { it.id }
+        for (xid in x11ManagedWindows.keys.toList()) {
+            if (xid !in live) x11ManagedWindows.remove(xid)?.let { finalizeClose(it) }
+        }
+        list.forEachIndexed { index, win ->
+            val title = win.title.ifBlank { win.cls.ifBlank { "Aplicativo X11" } }
+            val existing = x11ManagedWindows[win.id]
+            if (existing != null && contents.containsKey(existing)) {
+                wm.setTitle(existing, title)
+            } else {
+                val wa = wm.state.value.workArea
+                val width = (win.w.takeIf { it > 0 }?.toFloat() ?: wa.w * 0.68f).coerceIn(WindowManagerCore.MIN_W, wa.w)
+                val height = (win.h.takeIf { it > 0 }?.toFloat() ?: wa.h * 0.68f).coerceIn(WindowManagerCore.MIN_H, wa.h)
+                val offset = (index % 5) * 26f
+                val managedId = wm.open(title, "x11:${win.id}", "x11-client",
+                    Frame(wa.x + 24f + offset, wa.y + 24f + offset, width, height))
+                x11ManagedWindows[win.id] = managedId
+                contents[managedId] = WindowContent.X11ClientWindow(win.id)
+                AppImageSupport.pending()?.let { guestIcons["x11:${win.id}"] = it }
+            }
+        }
+    }
+
     fun finalizeClose(id: Int) {
         closing.remove(id)
         orientOverride.remove(id)
@@ -242,6 +331,7 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
             is WindowContent.AndroidWin -> launcher.release(c)
             is WindowContent.Capture -> { c.vd?.release(); c.surface?.release() }
             is WindowContent.WaylandClientWindow -> app.wayland.closeClientWindow(c.waylandId)
+            is WindowContent.X11ClientWindow -> app.x11.closeWindow(c.xid)
             else -> {}
         }
         wm.close(id)
@@ -252,13 +342,27 @@ class DesktopSession(val displayId: Int, val app: PlasmaApp) {
         wm.setWorkArea(if (panelTop) Frame(0f, panelPx, w, h - panelPx) else Frame(0f, 0f, w, h - panelPx))
     }
 
-    fun shutdown() { wm.state.value.windows.map { it.id }.forEach { finalizeClose(it) } }
-    fun showToast(t: String) { toast = t }
+    fun shutdown() {
+        wm.state.value.windows.map { it.id }.forEach { id ->
+            val c = contents[id]
+            if (c is WindowContent.WaylandClientWindow && keepAlive(c.waylandId)) return@forEach
+            finalizeClose(id)
+        }
+    }
+
+    private fun keepAlive(waylandId: Long): Boolean = runCatching {
+        app.wayland.windows.value.any { it.id == waylandId && it.appId == "pi-apps" }
+    }.getOrDefault(false)    fun showToast(t: String) { toast = t }
 }
 
 class SessionRegistry(private val app: PlasmaApp) {
     private val map = HashMap<Int, DesktopSession>()
     @Synchronized fun obtain(displayId: Int): DesktopSession = map.getOrPut(displayId) { DesktopSession(displayId, app) }
-    @Synchronized fun release(displayId: Int) { map.remove(displayId)?.shutdown() }
+    @Synchronized fun release(displayId: Int) {
+        map.remove(displayId)?.shutdown()
+        if (map.isEmpty()) runCatching {
+            if (app.wayland.windows.value.isEmpty()) app.wayland.stop()
+        }
+    }
     @Synchronized fun all(): List<DesktopSession> = map.values.toList()
 }

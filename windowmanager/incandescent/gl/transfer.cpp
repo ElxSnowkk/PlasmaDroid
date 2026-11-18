@@ -1,21 +1,5 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
-// Incandescent - gl/transfer.cpp
-// Copyright (c) 2025-2026 MobileGL-Dev
-// Licensed under the GNU Lesser General Public License v2.1:
-//   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
-// SPDX-License-Identifier: LGPL-2.1-only
-// End of Source File Header
 
-// ---------------------------------------------------------------------------
-// Decoders. Each reads one source pixel and writes RGBA (or RGB) bytes in
-// memory order. The packed GL_UNSIGNED_INT_* types are defined as components
-// of a host-endian integer -- non-REV packs the format's first component into
-// the most significant bits, REV into the least -- so decoding through an
-// integer load is endian-correct by construction. Only GL_UNSIGNED_BYTE
-// addresses memory directly, and its component order *is* memory order.
-// ---------------------------------------------------------------------------
 
 #include "transfer.h"
 #include "buffer.h"

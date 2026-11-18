@@ -1,8 +1,4 @@
-// Parte do PlasmaDroid — Incandescent (upscaler/renderer).
-// Créditos: baseado no projeto Mobile Glues.
 
-// Generic upscaler dispatch — keeps algorithm implementations independent from the FSR1 backend.
-// SPDX-License-Identifier: LGPL-2.1-only
 
 #include "ShaderProvider.h"
 

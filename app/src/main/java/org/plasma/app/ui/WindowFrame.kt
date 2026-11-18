@@ -1,19 +1,3 @@
-/*
- * This file belongs to the PlasmaDroid project.
- *
- * Copyright (C) 2026 ElxSnowkk (https://github.com/ElxSnowkk)
- *
- * PlasmaDroid is free software: you can redistribute it and/or modify it under the
- * terms of the GNU General Public License as published by the Free Software
- * Foundation, either version 3 of the License, or (at your option) any later version.
- *
- * Licensed under GPL-3.0-or-later. See the LICENSE file at the project root,
- * or <https://www.gnu.org/licenses/gpl-3.0.html>.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT ANY
- * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE. See the GNU General Public License for more details.
- */
 
 package org.plasma.app.ui
 
@@ -116,7 +100,7 @@ fun WindowFrame(session: DesktopSession, win: ManagedWindow, focused: Boolean, v
                     ambientShadowColor = Color(0x66000000)
                     spotShadowColor = Color(0xAA000000)
                 }
-                .clip(shape).then(if (translucent) Modifier else Modifier.background(b.window)).border(1.dp, if (focused) b.line else b.line.copy(alpha = .6f), shape)
+                .then(if (fx.glass) Modifier.glass(b.window, if (maxed) 0.dp else U.frameRadius, z = 5f, alpha = { p.value }) else Modifier.clip(shape).then(if (translucent) Modifier else Modifier.background(b.window))).border(1.dp, if (focused) b.line else b.line.copy(alpha = .6f), shape)
                 .pointerInput(win.id) {
                     awaitPointerEventScope {
                         while (true) {
@@ -139,6 +123,7 @@ fun WindowFrame(session: DesktopSession, win: ManagedWindow, focused: Boolean, v
                         WindowContent.Setup -> SetupWindow(session)
                         WindowContent.WaylandDisplay -> WaylandDisplayContent(session)
                         is WindowContent.WaylandClientWindow -> AspectFit(session, win) { WaylandClientWindowContent(session, c.waylandId) }
+                        is WindowContent.X11ClientWindow -> AspectFit(session, win) { X11ClientWindowContent(session, c.xid) }
                         is WindowContent.Terminal -> KonsoleWindow(session, c)
                         is WindowContent.Capture -> CaptureContent(session, c)
                         null -> {}
@@ -344,6 +329,12 @@ private fun AndroidWindowContent(session: DesktopSession, c: WindowContent.Andro
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        if (c.displayId <= 0) {
+            Column(Modifier.align(Alignment.Center).padding(16.dp)) {
+                T(c.status, 12.sp, Color.White)
+            }
+        }
 
         Box(Modifier.fillMaxSize().androidInput(c) { session.app.backends.current() })
     }
