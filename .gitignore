@@ -1,5 +1,7 @@
 # Build e artefatos
 build/
+!AMD64RFs/build/
+AMD64RFs/build/out/
 dist/
 .gradle/
 .idea/

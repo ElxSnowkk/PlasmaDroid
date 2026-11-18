@@ -1,0 +1,31 @@
+name: debian-x86-rootfs
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'AMD64RFs/build/build-debian-x86-rootfs.sh'
+      - '.github/workflows/debian-x86-rootfs.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Monta o rootfs Debian 13 amd64
+        run: bash AMD64RFs/build/build-debian-x86-rootfs.sh
+
+      - name: Publica na release debian-x86-rootfs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view debian-x86-rootfs >/dev/null 2>&1 || \
+            gh release create debian-x86-rootfs --title "Debian 13 amd64 rootfs" \
+              --notes "Rootfs x86-64 pronto para o FEX (gerado por .github/workflows/debian-x86-rootfs.yml)."
+          gh release upload debian-x86-rootfs --clobber \
+            AMD64RFs/build/out/debian-x86-rootfs.tar.gz AMD64RFs/build/out/debian-x86-rootfs.tar.gz.sha256
