@@ -17,6 +17,9 @@ Linux support comes from PRoot, which gives the guest a Debian root filesystem w
 - [x] Wayland host with a compositor that brings Linux windows onto the desktop
 - [x] Android windowed apps
 - [x] Shizuku input service for mouse, keyboard and touch input in any app window
+- [x] Fex EMU X86 for Debian
+- [x] Pi-Apps Shop Embedded
+- [X] X11 (Plasma-x11) Compositor
 
 ### Hardware acceleration
 
