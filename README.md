@@ -58,3 +58,6 @@ This is a work in progress. The latest changes have not been compiled or tested 
 ## License
 
 PlasmaDroid is released under GPL-3.0-or-later. See `LICENSE`. The Shizuku API is Apache-2.0.
+
+# Special Thanks for:
+@pervia and @Gtdark123, Which helped me a lot in debugging the project, with tests on Adreno, since my only test device is a Mali G76.
